@@ -155,6 +155,12 @@ const hotp = async (secret, counter) => {
 
 const totp = (secret, period = 30) => hotp(secret, Math.floor(Date.now() / 1000 / period));
 
+const getRemainingSeconds = (period) => {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const elapsed = nowSeconds % period;
+  return period - elapsed;
+};
+
 const renderAccounts = async () => {
   els.accountsList.innerHTML = '';
 
@@ -167,16 +173,30 @@ const renderAccounts = async () => {
     left.innerHTML = `<strong>${title}</strong><div class="muted">${account.algorithm} · ${account.period}s</div>`;
 
     let code = '••••••';
+    let copyDisabled = true;
+    const remaining = getRemainingSeconds(account.period);
+    const progressPercent = Math.max(0, Math.min(100, (remaining / account.period) * 100));
+
     if (state.masterPassword) {
       try {
         const secret = await decryptSecret(account.secret_enc, account.iv, state.masterPassword);
         code = await totp(secret, account.period);
+        copyDisabled = false;
       } catch {
         code = 'ERR';
       }
     }
 
-    right.innerHTML = `<div class="code">${code}</div>`;
+    right.innerHTML = `
+      <div class="account-right">
+        <div class="code">${code}</div>
+        <div class="code-meta">
+          <span>Обновится через ${remaining}с</span>
+          <button class="copy-btn" type="button" data-code="${code}" ${copyDisabled ? 'disabled' : ''}>Копировать</button>
+        </div>
+        <div class="code-progress"><span style="width:${progressPercent}%"></span></div>
+      </div>
+    `;
     li.appendChild(left);
     li.appendChild(right);
     els.accountsList.appendChild(li);
@@ -277,6 +297,22 @@ document.getElementById('unlock-btn').addEventListener('click', async () => {
   if (!password) return;
   state.masterPassword = password;
   await renderAccounts();
+});
+
+els.accountsList.addEventListener('click', async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  if (!target.classList.contains('copy-btn')) return;
+
+  const code = target.dataset.code;
+  if (!code || code === '••••••' || code === 'ERR') return;
+
+  try {
+    await navigator.clipboard.writeText(code);
+    setStatus('Код скопирован в буфер', 'success');
+  } catch {
+    setStatus('Не удалось скопировать код', 'error');
+  }
 });
 
 els.addAccountForm.addEventListener('submit', async (event) => {

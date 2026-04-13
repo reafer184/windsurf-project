@@ -255,6 +255,49 @@ button:hover {
   color: #1f2c4a;
 }
 
+.account-right {
+  min-width: 200px;
+  display: grid;
+  gap: 6px;
+}
+
+.code-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.copy-btn {
+  width: auto;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 999px;
+  background: #fff;
+  color: #24304f;
+  border: 1px solid var(--line);
+}
+
+.copy-btn:hover {
+  background: #eef2ff;
+}
+
+.code-progress {
+  height: 6px;
+  background: #ebefff;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.code-progress span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #7ea0ff, #5f7de0);
+  transition: width 0.35s linear;
+}
+
 #status {
   min-height: 24px;
   color: #b45309;
@@ -317,5 +360,17 @@ button:hover {
 
   .tabs {
     width: 100%;
+  }
+
+  .accounts li {
+    flex-direction: column;
+  }
+
+  .account-right {
+    min-width: 0;
+  }
+
+  .code-meta {
+    flex-wrap: wrap;
   }
 }
