@@ -177,6 +177,9 @@ const decryptSecret = async (secretEnc, ivB64, password) => {
   if (ivB64 === 'http-fallback') {
     return xorDecrypt(secretEnc, password);
   }
+  if (!isCryptoAvailable()) {
+    throw new Error('Расшифровать сохранённый секрет можно только через HTTPS. Открой приложение по защищённому адресу.');
+  }
   const key = await deriveKey(password, 'totp-static-salt-v1');
   const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromBase64(ivB64) }, key, fromBase64(secretEnc));
   return new TextDecoder().decode(plain);
