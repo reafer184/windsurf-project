@@ -23,7 +23,11 @@ const els = {
 };
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  navigator.serviceWorker.getRegistrations().then((registrations) => {
+    registrations.forEach((registration) => {
+      registration.unregister().catch(() => {});
+    });
+  }).catch(() => {});
 }
 
 const setStatus = (msg, type = 'info') => {
