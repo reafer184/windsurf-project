@@ -115,7 +115,17 @@ const toBase64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
 const fromBase64 = (base64) => Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
 
 const isCryptoAvailable = () => {
-  return typeof crypto !== 'undefined' && crypto.subtle && window.isSecureContext;
+  const webCrypto = globalThis.crypto;
+  return Boolean(
+    webCrypto
+    && typeof webCrypto.getRandomValues === 'function'
+    && webCrypto.subtle
+    && typeof webCrypto.subtle.importKey === 'function'
+    && typeof webCrypto.subtle.encrypt === 'function'
+    && typeof webCrypto.subtle.decrypt === 'function'
+    && typeof webCrypto.subtle.sign === 'function'
+    && window.isSecureContext
+  );
 };
 
 const simpleHash = (str) => {
@@ -151,6 +161,9 @@ const xorDecrypt = (encrypted, password) => {
 };
 
 const deriveKey = async (password, salt) => {
+  if (!isCryptoAvailable()) {
+    throw new Error('WEBCRYPTO_UNAVAILABLE');
+  }
   const enc = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
   return crypto.subtle.deriveKey(
@@ -167,10 +180,15 @@ const encryptSecret = async (secret, password) => {
     const encrypted = xorEncrypt(secret, password);
     return { secret_enc: encrypted, iv: 'http-fallback' };
   }
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await deriveKey(password, 'totp-static-salt-v1');
-  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(secret));
-  return { secret_enc: toBase64(encrypted), iv: toBase64(iv) };
+  try {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const key = await deriveKey(password, 'totp-static-salt-v1');
+    const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(secret));
+    return { secret_enc: toBase64(encrypted), iv: toBase64(iv) };
+  } catch {
+    const encrypted = xorEncrypt(secret, password);
+    return { secret_enc: encrypted, iv: 'http-fallback' };
+  }
 };
 
 const decryptSecret = async (secretEnc, ivB64, password) => {
@@ -272,8 +290,12 @@ const hotp = async (secret, counter) => {
   
   let hmac;
   if (isCryptoAvailable()) {
-    const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
-    hmac = new Uint8Array(await crypto.subtle.sign('HMAC', key, message));
+    try {
+      const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+      hmac = new Uint8Array(await crypto.subtle.sign('HMAC', key, message));
+    } catch {
+      hmac = hmacSha1(keyBytes, message);
+    }
   } else {
     hmac = hmacSha1(keyBytes, message);
   }
