@@ -22,5 +22,7 @@ export const errorHandler = (err: unknown, _req: Request, res: Response, _next: 
     return;
   }
 
+  console.error('Unhandled API error:', err);
+
   res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Внутренняя ошибка сервера' });
 };
