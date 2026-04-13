@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TOTP Authenticator</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>TOTP Authenticator</h1>
+      <p class="subtitle">MVP PWA-клиент</p>
+
+      <section id="auth-view" class="card">
+        <h2>Авторизация</h2>
+        <div class="tabs">
+          <button id="tab-login" class="active">Вход</button>
+          <button id="tab-register">Регистрация</button>
+        </div>
+
+        <form id="auth-form">
+          <input id="email" type="email" placeholder="Email" required />
+          <input id="password" type="password" placeholder="Пароль" required minlength="8" />
+          <input id="display-name" type="text" placeholder="Имя (только для регистрации)" />
+          <button type="submit" id="auth-submit">Войти</button>
+        </form>
+      </section>
+
+      <section id="app-view" class="hidden">
+        <div class="card">
+          <h2>Аккаунты</h2>
+          <div class="toolbar">
+            <button id="unlock-btn">Разблокировать секреты</button>
+            <button id="refresh-btn">Обновить</button>
+            <button id="logout-btn">Выйти</button>
+          </div>
+          <ul id="accounts-list" class="accounts"></ul>
+        </div>
+
+        <div class="card">
+          <h2>Добавить аккаунт</h2>
+          <form id="add-account-form">
+            <input id="issuer" type="text" placeholder="Сервис (issuer)" required />
+            <input id="account-name" type="text" placeholder="Аккаунт" />
+            <input id="secret" type="text" placeholder="Секрет Base32" required />
+            <button type="submit">Сохранить</button>
+          </form>
+        </div>
+      </section>
+
+      <p id="status"></p>
+    </main>
+    <script src="app.js" type="module"></script>
+  </body>
+</html>
