@@ -114,6 +114,42 @@ const toBase64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
 
 const fromBase64 = (base64) => Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
 
+const isCryptoAvailable = () => {
+  return typeof crypto !== 'undefined' && crypto.subtle && window.isSecureContext;
+};
+
+const simpleHash = (str) => {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash).toString(16).padStart(8, '0');
+};
+
+const xorEncrypt = (text, password) => {
+  const key = simpleHash(password + 'totp-salt-v1');
+  const textBytes = new TextEncoder().encode(text);
+  const keyBytes = new TextEncoder().encode(key);
+  const result = new Uint8Array(textBytes.length);
+  for (let i = 0; i < textBytes.length; i++) {
+    result[i] = textBytes[i] ^ keyBytes[i % keyBytes.length];
+  }
+  return toBase64(result);
+};
+
+const xorDecrypt = (encrypted, password) => {
+  const key = simpleHash(password + 'totp-salt-v1');
+  const encBytes = fromBase64(encrypted);
+  const keyBytes = new TextEncoder().encode(key);
+  const result = new Uint8Array(encBytes.length);
+  for (let i = 0; i < encBytes.length; i++) {
+    result[i] = encBytes[i] ^ keyBytes[i % keyBytes.length];
+  }
+  return new TextDecoder().decode(result);
+};
+
 const deriveKey = async (password, salt) => {
   const enc = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
@@ -127,6 +163,10 @@ const deriveKey = async (password, salt) => {
 };
 
 const encryptSecret = async (secret, password) => {
+  if (!isCryptoAvailable()) {
+    const encrypted = xorEncrypt(secret, password);
+    return { secret_enc: encrypted, iv: 'http-fallback' };
+  }
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await deriveKey(password, 'totp-static-salt-v1');
   const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(secret));
@@ -134,6 +174,9 @@ const encryptSecret = async (secret, password) => {
 };
 
 const decryptSecret = async (secretEnc, ivB64, password) => {
+  if (ivB64 === 'http-fallback') {
+    return xorDecrypt(secretEnc, password);
+  }
   const key = await deriveKey(password, 'totp-static-salt-v1');
   const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromBase64(ivB64) }, key, fromBase64(secretEnc));
   return new TextDecoder().decode(plain);
@@ -155,11 +198,83 @@ const base32ToBytes = (input) => {
   return new Uint8Array(bytes);
 };
 
+const sha1 = (bytes) => {
+  const rotl = (n, b) => (n << b) | (n >>> (32 - b));
+  const words = [];
+  for (let i = 0; i < bytes.length; i += 4) {
+    words.push((bytes[i] << 24) | (bytes[i + 1] << 16) | (bytes[i + 2] << 8) | bytes[i + 3]);
+  }
+  const bitLen = bytes.length * 8;
+  words[bytes.length >> 2] |= 0x80 << (24 - (bytes.length % 4) * 8);
+  words[(((bytes.length + 8) >> 6) << 4) + 15] = bitLen;
+  
+  let [h0, h1, h2, h3, h4] = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];
+  
+  for (let i = 0; i < words.length; i += 16) {
+    const w = words.slice(i, i + 16);
+    for (let j = 16; j < 80; j++) {
+      w[j] = rotl(w[j - 3] ^ w[j - 8] ^ w[j - 14] ^ w[j - 16], 1);
+    }
+    let [a, b, c, d, e] = [h0, h1, h2, h3, h4];
+    for (let j = 0; j < 80; j++) {
+      const [f, k] = j < 20 ? [(b & c) | (~b & d), 0x5A827999] :
+                     j < 40 ? [b ^ c ^ d, 0x6ED9EBA1] :
+                     j < 60 ? [(b & c) | (b & d) | (c & d), 0x8F1BBCDC] :
+                              [b ^ c ^ d, 0xCA62C1D6];
+      const temp = (rotl(a, 5) + f + e + k + w[j]) >>> 0;
+      [e, d, c, b, a] = [d, c, rotl(b, 30), a, temp];
+    }
+    [h0, h1, h2, h3, h4] = [(h0 + a) >>> 0, (h1 + b) >>> 0, (h2 + c) >>> 0, (h3 + d) >>> 0, (h4 + e) >>> 0];
+  }
+  
+  const result = new Uint8Array(20);
+  [h0, h1, h2, h3, h4].forEach((h, i) => {
+    result[i * 4] = h >>> 24;
+    result[i * 4 + 1] = h >>> 16;
+    result[i * 4 + 2] = h >>> 8;
+    result[i * 4 + 3] = h;
+  });
+  return result;
+};
+
+const hmacSha1 = (key, message) => {
+  const blockSize = 64;
+  if (key.length > blockSize) key = sha1(key);
+  if (key.length < blockSize) {
+    const padded = new Uint8Array(blockSize);
+    padded.set(key);
+    key = padded;
+  }
+  
+  const ipad = new Uint8Array(blockSize + message.length);
+  const opad = new Uint8Array(blockSize + 20);
+  
+  for (let i = 0; i < blockSize; i++) {
+    ipad[i] = key[i] ^ 0x36;
+    opad[i] = key[i] ^ 0x5C;
+  }
+  ipad.set(message, blockSize);
+  
+  const innerHash = sha1(ipad);
+  opad.set(innerHash, blockSize);
+  
+  return sha1(opad);
+};
+
 const hotp = async (secret, counter) => {
-  const key = await crypto.subtle.importKey('raw', base32ToBytes(secret), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+  const keyBytes = base32ToBytes(secret);
   const view = new DataView(new ArrayBuffer(8));
   view.setUint32(4, counter);
-  const hmac = new Uint8Array(await crypto.subtle.sign('HMAC', key, view.buffer));
+  const message = new Uint8Array(view.buffer);
+  
+  let hmac;
+  if (isCryptoAvailable()) {
+    const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+    hmac = new Uint8Array(await crypto.subtle.sign('HMAC', key, message));
+  } else {
+    hmac = hmacSha1(keyBytes, message);
+  }
+  
   const offset = hmac[hmac.length - 1] & 0xf;
   const code = ((hmac[offset] & 0x7f) << 24) | ((hmac[offset + 1] & 0xff) << 16) | ((hmac[offset + 2] & 0xff) << 8) | (hmac[offset + 3] & 0xff);
   return String(code % 1000000).padStart(6, '0');
