@@ -1,9 +1,14 @@
 :root {
-  --bg: #0f172a;
-  --card: #1e293b;
-  --text: #e2e8f0;
-  --muted: #94a3b8;
-  --primary: #22c55e;
+  --bg: #f4f6fb;
+  --bg-accent: #e4ebff;
+  --card: rgba(255, 255, 255, 0.86);
+  --text: #172034;
+  --muted: #5f6f94;
+  --line: #d6dff5;
+  --brand: #ff6b4a;
+  --brand-hover: #ef5b39;
+  --brand-soft: #ffe1d8;
+  --shadow: 0 20px 45px rgba(28, 41, 73, 0.12);
 }
 
 * {
@@ -12,53 +17,156 @@
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: radial-gradient(circle at top, #1e293b, #0f172a);
+  font-family: 'Manrope', 'Segoe UI', sans-serif;
+  background:
+    radial-gradient(1000px 500px at 10% -5%, var(--bg-accent), transparent 70%),
+    linear-gradient(145deg, #f8faff 0%, var(--bg) 70%);
   color: var(--text);
+  min-height: 100vh;
+}
+
+.bg-shape {
+  position: fixed;
+  width: 340px;
+  height: 340px;
+  border-radius: 999px;
+  filter: blur(48px);
+  z-index: -1;
+  opacity: 0.45;
+}
+
+.bg-shape-left {
+  left: -100px;
+  top: -60px;
+  background: #ffccb7;
+}
+
+.bg-shape-right {
+  right: -100px;
+  bottom: -120px;
+  background: #bfd2ff;
 }
 
 .container {
-  max-width: 720px;
+  max-width: 980px;
   margin: 0 auto;
-  padding: 24px 16px 48px;
+  padding: 42px 20px 60px;
+}
+
+.hero {
+  margin-bottom: 20px;
+  animation: fadeUp 0.45s ease both;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  margin: 0 0 12px;
+  background: var(--brand-soft);
+  color: #b43f26;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1,
+h2 {
+  font-family: 'Space Grotesk', 'Manrope', sans-serif;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+h1 {
+  font-size: clamp(30px, 4vw, 44px);
+  line-height: 1.05;
+}
+
+h2 {
+  font-size: clamp(22px, 2.4vw, 28px);
+  line-height: 1.2;
 }
 
 .subtitle {
   color: var(--muted);
-  margin-top: -8px;
+  margin: 12px 0 0;
+  max-width: 680px;
+}
+
+.app-grid {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
+  gap: 16px;
 }
 
 .card {
-  background: rgba(30, 41, 59, 0.9);
-  border: 1px solid #334155;
-  border-radius: 14px;
-  padding: 16px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 20px;
   margin-bottom: 16px;
+  backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+  animation: fadeUp 0.45s ease both;
 }
 
-form {
+.card-head {
+  margin-bottom: 14px;
+}
+
+.card-head p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.form-grid {
   display: grid;
   gap: 10px;
 }
 
+.auth-card .form-grid {
+  grid-template-columns: 1fr 1fr 1fr auto;
+}
+
+#add-account-form {
+  grid-template-columns: 1fr 1fr 1fr auto;
+}
+
 input,
 button {
-  border-radius: 10px;
-  border: 1px solid #334155;
-  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  padding: 11px 12px;
   font-size: 15px;
+  transition: all 0.2s ease;
 }
 
 input {
-  background: #0b1220;
+  background: #ffffff;
   color: var(--text);
 }
 
+input:focus {
+  outline: none;
+  border-color: #9bb2f3;
+  box-shadow: 0 0 0 4px rgba(89, 122, 221, 0.15);
+}
+
 button {
-  background: var(--primary);
-  color: #052e16;
-  font-weight: 700;
+  font-family: inherit;
+  font-weight: 800;
+  letter-spacing: 0.01em;
   cursor: pointer;
+  background: var(--brand);
+  color: #fff;
+}
+
+button:hover {
+  background: var(--brand-hover);
+  transform: translateY(-1px);
 }
 
 .hidden {
@@ -66,19 +174,27 @@ button {
 }
 
 .tabs {
-  display: flex;
-  gap: 8px;
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
   margin-bottom: 12px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f7f9ff;
 }
 
 .tabs button {
-  flex: 1;
-  background: #0b1220;
-  color: var(--text);
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  box-shadow: none;
 }
 
 .tabs button.active {
-  border-color: var(--primary);
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--line);
 }
 
 .toolbar {
@@ -88,30 +204,94 @@ button {
   margin-bottom: 12px;
 }
 
+.toolbar button {
+  background: #fff;
+  color: #24304f;
+}
+
+.toolbar button:hover {
+  background: #eef2ff;
+}
+
 .accounts {
   list-style: none;
   padding: 0;
   margin: 0;
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .accounts li {
-  border: 1px solid #334155;
-  border-radius: 10px;
-  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
+  background: #fff;
+}
+
+.muted {
+  color: var(--muted);
 }
 
 .code {
-  font-size: 20px;
-  font-weight: 800;
-  letter-spacing: 2px;
+  font-family: 'Space Grotesk', monospace;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #1f2c4a;
 }
 
 #status {
   min-height: 24px;
-  color: #fcd34d;
+  color: #b45309;
+  font-weight: 700;
+  margin-top: 8px;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 960px) {
+  .app-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-card .form-grid,
+  #add-account-form {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .container {
+    padding: 28px 14px 44px;
+  }
+
+  .card {
+    padding: 16px;
+    border-radius: 16px;
+  }
+
+  .auth-card .form-grid,
+  #add-account-form {
+    grid-template-columns: 1fr;
+  }
+
+  button {
+    width: 100%;
+  }
+
+  .tabs {
+    width: 100%;
+  }
 }

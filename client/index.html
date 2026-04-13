@@ -4,22 +4,38 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>TOTP Authenticator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Space+Grotesk:wght@600;700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="container">
-      <h1>TOTP Authenticator</h1>
-      <p class="subtitle">MVP PWA-клиент</p>
+    <div class="bg-shape bg-shape-left" aria-hidden="true"></div>
+    <div class="bg-shape bg-shape-right" aria-hidden="true"></div>
 
-      <section id="auth-view" class="card">
-        <h2>Авторизация</h2>
-        <div class="tabs">
-          <button id="tab-login" class="active">Вход</button>
-          <button id="tab-register">Регистрация</button>
+    <main class="container">
+      <header class="hero">
+        <p class="badge">Secure PWA</p>
+        <h1>TOTP Authenticator</h1>
+        <p class="subtitle">Управление одноразовыми кодами в минималистичном защищённом интерфейсе.</p>
+      </header>
+
+      <section id="auth-view" class="card auth-card">
+        <div class="card-head">
+          <h2>Вход в приложение</h2>
+          <p>Используй email и пароль, чтобы открыть защищённое хранилище.</p>
         </div>
 
-        <form id="auth-form">
+        <div class="tabs">
+          <button id="tab-login" class="active" type="button">Вход</button>
+          <button id="tab-register" type="button">Регистрация</button>
+        </div>
+
+        <form id="auth-form" class="form-grid">
           <input id="email" type="email" placeholder="Email" required />
           <input id="password" type="password" placeholder="Пароль" required minlength="8" />
           <input id="display-name" type="text" placeholder="Имя (только для регистрации)" />
@@ -27,9 +43,12 @@
         </form>
       </section>
 
-      <section id="app-view" class="hidden">
+      <section id="app-view" class="hidden app-grid">
         <div class="card">
-          <h2>Аккаунты</h2>
+          <div class="card-head">
+            <h2>Мои аккаунты</h2>
+            <p>Коды обновляются автоматически каждую секунду.</p>
+          </div>
           <div class="toolbar">
             <button id="unlock-btn">Разблокировать секреты</button>
             <button id="refresh-btn">Обновить</button>
@@ -39,8 +58,11 @@
         </div>
 
         <div class="card">
-          <h2>Добавить аккаунт</h2>
-          <form id="add-account-form">
+          <div class="card-head">
+            <h2>Добавить аккаунт</h2>
+            <p>Вставь Base32 секрет и сохрани запись в зашифрованном виде.</p>
+          </div>
+          <form id="add-account-form" class="form-grid">
             <input id="issuer" type="text" placeholder="Сервис (issuer)" required />
             <input id="account-name" type="text" placeholder="Аккаунт" />
             <input id="secret" type="text" placeholder="Секрет Base32" required />
