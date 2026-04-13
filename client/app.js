@@ -5,7 +5,8 @@ const state = {
   accessToken: sessionStorage.getItem('access_token') || '',
   refreshToken: localStorage.getItem('refresh_token') || '',
   accounts: [],
-  masterPassword: ''
+  masterPassword: '',
+  authSubmitting: false
 };
 
 const els = {
@@ -17,25 +18,58 @@ const els = {
   status: document.getElementById('status'),
   tabLogin: document.getElementById('tab-login'),
   tabRegister: document.getElementById('tab-register'),
-  submit: document.getElementById('auth-submit')
+  submit: document.getElementById('auth-submit'),
+  displayName: document.getElementById('display-name')
 };
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
-const setStatus = (msg) => {
+const setStatus = (msg, type = 'info') => {
   els.status.textContent = msg;
+  els.status.classList.remove('status-error', 'status-success', 'status-loading');
+  if (type === 'error') els.status.classList.add('status-error');
+  if (type === 'success') els.status.classList.add('status-success');
+  if (type === 'loading') els.status.classList.add('status-loading');
+};
+
+const setAuthMode = (mode) => {
+  state.mode = mode;
+  const registerMode = mode === 'register';
+  els.tabLogin.classList.toggle('active', !registerMode);
+  els.tabRegister.classList.toggle('active', registerMode);
+  els.submit.textContent = registerMode ? 'Зарегистрироваться' : 'Войти';
+  els.displayName.classList.toggle('hidden', !registerMode);
+  els.displayName.required = registerMode;
+};
+
+const fetchWithTimeout = async (url, options = {}, timeoutMs = 10000) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 };
 
 const api = async (path, options = {}) => {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   if (state.accessToken) headers.Authorization = `Bearer ${state.accessToken}`;
 
-  let response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  let response;
+  try {
+    response = await fetchWithTimeout(`${API_BASE}${path}`, { ...options, headers });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('Сервер отвечает слишком долго. Попробуй снова.');
+    }
+    throw new Error('Нет соединения с сервером. Проверь сеть и попробуй снова.');
+  }
 
   if (response.status === 401 && state.refreshToken) {
-    const refreshed = await fetch(`${API_BASE}/auth/refresh`, {
+    const refreshed = await fetchWithTimeout(`${API_BASE}/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: state.refreshToken })
@@ -48,13 +82,16 @@ const api = async (path, options = {}) => {
       sessionStorage.setItem('access_token', state.accessToken);
       localStorage.setItem('refresh_token', state.refreshToken);
       headers.Authorization = `Bearer ${state.accessToken}`;
-      response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+      response = await fetchWithTimeout(`${API_BASE}${path}`, { ...options, headers });
     }
   }
 
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
+    if (response.status >= 500) {
+      throw new Error('Ошибка сервера. Попробуй чуть позже.');
+    }
     throw new Error(data.message || data.error || 'Ошибка запроса');
   }
 
@@ -164,26 +201,29 @@ const showAuth = () => {
 };
 
 els.tabLogin.addEventListener('click', () => {
-  state.mode = 'login';
-  els.tabLogin.classList.add('active');
-  els.tabRegister.classList.remove('active');
-  els.submit.textContent = 'Войти';
+  setAuthMode('login');
 });
 
 els.tabRegister.addEventListener('click', () => {
-  state.mode = 'register';
-  els.tabRegister.classList.add('active');
-  els.tabLogin.classList.remove('active');
-  els.submit.textContent = 'Зарегистрироваться';
+  setAuthMode('register');
 });
 
 els.authForm.addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (state.authSubmitting) return;
 
   try {
+    state.authSubmitting = true;
+    els.submit.disabled = true;
+    setStatus(state.mode === 'register' ? 'Создаю аккаунт...' : 'Выполняю вход...', 'loading');
+
     const email = document.getElementById('email').value.trim();
     const password = document.getElementById('password').value;
     const displayName = document.getElementById('display-name').value.trim();
+
+    if (state.mode === 'register' && !displayName) {
+      throw new Error('Для регистрации укажи имя.');
+    }
 
     const path = state.mode === 'register' ? '/auth/register' : '/auth/login';
     const body = state.mode === 'register'
@@ -195,10 +235,14 @@ els.authForm.addEventListener('submit', async (event) => {
     state.refreshToken = data.refresh_token;
     sessionStorage.setItem('access_token', state.accessToken);
     localStorage.setItem('refresh_token', state.refreshToken);
-    setStatus('Успешный вход');
+    setStatus(state.mode === 'register' ? 'Аккаунт создан, вход выполнен' : 'Успешный вход', 'success');
     await showApp();
   } catch (error) {
-    setStatus(error.message);
+    setStatus(error.message, 'error');
+  } finally {
+    state.authSubmitting = false;
+    els.submit.disabled = false;
+    els.submit.textContent = state.mode === 'register' ? 'Зарегистрироваться' : 'Войти';
   }
 });
 
@@ -216,15 +260,15 @@ document.getElementById('logout-btn').addEventListener('click', async () => {
   sessionStorage.removeItem('access_token');
   localStorage.removeItem('refresh_token');
   showAuth();
-  setStatus('Выход выполнен');
+  setStatus('Выход выполнен', 'success');
 });
 
 document.getElementById('refresh-btn').addEventListener('click', async () => {
   try {
     await loadAccounts();
-    setStatus('Список обновлен');
+    setStatus('Список обновлён', 'success');
   } catch (error) {
-    setStatus(error.message);
+    setStatus(error.message, 'error');
   }
 });
 
@@ -264,9 +308,9 @@ els.addAccountForm.addEventListener('submit', async (event) => {
 
     els.addAccountForm.reset();
     await loadAccounts();
-    setStatus('Аккаунт добавлен');
+    setStatus('Аккаунт добавлен', 'success');
   } catch (error) {
-    setStatus(error.message);
+    setStatus(error.message, 'error');
   }
 });
 
@@ -281,3 +325,5 @@ if (state.accessToken) {
 } else {
   showAuth();
 }
+
+setAuthMode('login');
