@@ -13,7 +13,7 @@ export const writeAuditLog = async (
       action,
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'] ?? null,
-      metadata: metadata ?? undefined
+      metadata: metadata ? (metadata as any) : undefined
     }
   });
 };
