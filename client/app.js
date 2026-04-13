@@ -86,13 +86,25 @@ const api = async (path, options = {}) => {
     }
   }
 
-  const data = await response.json().catch(() => ({}));
+  let data = {};
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    data = await response.json().catch(() => ({}));
+  } else {
+    const text = await response.text().catch(() => '');
+    if (text) data = { message: text };
+  }
 
   if (!response.ok) {
+    if (response.status === 429) {
+      throw new Error('Слишком много попыток. Подожди немного и попробуй снова.');
+    }
+
     if (response.status >= 500) {
       throw new Error('Ошибка сервера. Попробуй чуть позже.');
     }
-    throw new Error(data.message || data.error || 'Ошибка запроса');
+
+    throw new Error(data.message || data.error || `Ошибка запроса (${response.status})`);
   }
 
   return data;
