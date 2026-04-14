@@ -238,42 +238,80 @@ const base32ToBytes = (input) => {
 };
 
 const sha1 = (bytes) => {
-  const rotl = (n, b) => (n << b) | (n >>> (32 - b));
-  const words = [];
-  for (let i = 0; i < bytes.length; i += 4) {
-    words.push((bytes[i] << 24) | (bytes[i + 1] << 16) | (bytes[i + 2] << 8) | bytes[i + 3]);
-  }
+  const rotl = (n, b) => ((n << b) | (n >>> (32 - b))) >>> 0;
   const bitLen = bytes.length * 8;
-  words[bytes.length >> 2] |= 0x80 << (24 - (bytes.length % 4) * 8);
-  words[(((bytes.length + 8) >> 6) << 4) + 15] = bitLen;
-  
-  let [h0, h1, h2, h3, h4] = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];
-  
-  for (let i = 0; i < words.length; i += 16) {
-    const w = words.slice(i, i + 16);
-    for (let j = 16; j < 80; j++) {
-      w[j] = rotl(w[j - 3] ^ w[j - 8] ^ w[j - 14] ^ w[j - 16], 1);
+  const totalLen = (((bytes.length + 9 + 63) >> 6) << 6);
+  const padded = new Uint8Array(totalLen);
+  padded.set(bytes);
+  padded[bytes.length] = 0x80;
+
+  const view = new DataView(padded.buffer);
+  const high = Math.floor(bitLen / 0x100000000);
+  const low = bitLen >>> 0;
+  view.setUint32(totalLen - 8, high, false);
+  view.setUint32(totalLen - 4, low, false);
+
+  let h0 = 0x67452301;
+  let h1 = 0xEFCDAB89;
+  let h2 = 0x98BADCFE;
+  let h3 = 0x10325476;
+  let h4 = 0xC3D2E1F0;
+
+  for (let offset = 0; offset < totalLen; offset += 64) {
+    const w = new Uint32Array(80);
+    for (let i = 0; i < 16; i++) {
+      w[i] = view.getUint32(offset + i * 4, false);
     }
-    let [a, b, c, d, e] = [h0, h1, h2, h3, h4];
-    for (let j = 0; j < 80; j++) {
-      const [f, k] = j < 20 ? [(b & c) | (~b & d), 0x5A827999] :
-                     j < 40 ? [b ^ c ^ d, 0x6ED9EBA1] :
-                     j < 60 ? [(b & c) | (b & d) | (c & d), 0x8F1BBCDC] :
-                              [b ^ c ^ d, 0xCA62C1D6];
-      const temp = (rotl(a, 5) + f + e + k + w[j]) >>> 0;
-      [e, d, c, b, a] = [d, c, rotl(b, 30), a, temp];
+    for (let i = 16; i < 80; i++) {
+      w[i] = rotl((w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]) >>> 0, 1);
     }
-    [h0, h1, h2, h3, h4] = [(h0 + a) >>> 0, (h1 + b) >>> 0, (h2 + c) >>> 0, (h3 + d) >>> 0, (h4 + e) >>> 0];
+
+    let a = h0;
+    let b = h1;
+    let c = h2;
+    let d = h3;
+    let e = h4;
+
+    for (let i = 0; i < 80; i++) {
+      let f;
+      let k;
+      if (i < 20) {
+        f = (b & c) | (~b & d);
+        k = 0x5A827999;
+      } else if (i < 40) {
+        f = b ^ c ^ d;
+        k = 0x6ED9EBA1;
+      } else if (i < 60) {
+        f = (b & c) | (b & d) | (c & d);
+        k = 0x8F1BBCDC;
+      } else {
+        f = b ^ c ^ d;
+        k = 0xCA62C1D6;
+      }
+
+      const temp = (rotl(a, 5) + (f >>> 0) + e + k + w[i]) >>> 0;
+      e = d;
+      d = c;
+      c = rotl(b, 30);
+      b = a;
+      a = temp;
+    }
+
+    h0 = (h0 + a) >>> 0;
+    h1 = (h1 + b) >>> 0;
+    h2 = (h2 + c) >>> 0;
+    h3 = (h3 + d) >>> 0;
+    h4 = (h4 + e) >>> 0;
   }
-  
-  const result = new Uint8Array(20);
-  [h0, h1, h2, h3, h4].forEach((h, i) => {
-    result[i * 4] = h >>> 24;
-    result[i * 4 + 1] = h >>> 16;
-    result[i * 4 + 2] = h >>> 8;
-    result[i * 4 + 3] = h;
-  });
-  return result;
+
+  const out = new Uint8Array(20);
+  const outView = new DataView(out.buffer);
+  outView.setUint32(0, h0, false);
+  outView.setUint32(4, h1, false);
+  outView.setUint32(8, h2, false);
+  outView.setUint32(12, h3, false);
+  outView.setUint32(16, h4, false);
+  return out;
 };
 
 const hmacSha1 = (key, message) => {
