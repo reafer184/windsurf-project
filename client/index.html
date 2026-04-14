@@ -62,6 +62,7 @@
           <div class="card-head">
             <h2>Добавить аккаунт</h2>
             <p>Вставь Base32 секрет и сохрани запись в зашифрованном виде.</p>
+            <button id="scan-qr-btn" type="button" class="scan-btn">Сканировать QR</button>
           </div>
           <form id="add-account-form" class="form-grid">
             <input id="issuer" type="text" placeholder="Сервис (issuer)" required />
@@ -73,6 +74,17 @@
       </section>
 
       <p id="status" role="status" aria-live="polite"></p>
+
+      <div id="qr-modal" class="qr-modal hidden" aria-hidden="true">
+        <div class="qr-modal-content">
+          <h3>Сканирование QR</h3>
+          <p>Наведи камеру на QR-код с настройками TOTP.</p>
+          <video id="qr-video" autoplay playsinline muted></video>
+          <div class="qr-actions">
+            <button id="qr-close-btn" type="button">Закрыть</button>
+          </div>
+        </div>
+      </div>
     </main>
     <script src="app.js?v=20260414-crypto-fix" type="module"></script>
   </body>

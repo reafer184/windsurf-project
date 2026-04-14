@@ -225,6 +225,16 @@ button:hover {
   background: #eef2ff;
 }
 
+.scan-btn {
+  margin-top: 10px;
+  background: #fff;
+  color: #24304f;
+}
+
+.scan-btn:hover {
+  background: #eef2ff;
+}
+
 .accounts {
   list-style: none;
   padding: 0;
@@ -335,6 +345,51 @@ button:hover {
 
 #status.status-loading {
   color: #334eaa;
+}
+
+.qr-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(12, 16, 29, 0.68);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 20;
+}
+
+.qr-modal-content {
+  width: min(520px, 100%);
+  background: #fff;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+
+.qr-modal-content h3 {
+  margin: 0 0 8px;
+  font-family: 'Space Grotesk', 'Manrope', sans-serif;
+}
+
+.qr-modal-content p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+#qr-video {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #0f172a;
+  min-height: 240px;
+}
+
+.qr-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
 }
 
 @keyframes fadeUp {

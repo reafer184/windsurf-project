@@ -19,8 +19,15 @@ const els = {
   tabLogin: document.getElementById('tab-login'),
   tabRegister: document.getElementById('tab-register'),
   submit: document.getElementById('auth-submit'),
-  displayName: document.getElementById('display-name')
+  displayName: document.getElementById('display-name'),
+  scanQrBtn: document.getElementById('scan-qr-btn'),
+  qrModal: document.getElementById('qr-modal'),
+  qrVideo: document.getElementById('qr-video'),
+  qrCloseBtn: document.getElementById('qr-close-btn')
 };
+
+let qrStream = null;
+let qrScanFrame = null;
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then((registrations) => {
@@ -373,6 +380,129 @@ const getRemainingSeconds = (period) => {
   return period - elapsed;
 };
 
+const parseOtpAuthUri = (raw) => {
+  if (!raw || typeof raw !== 'string') {
+    throw new Error('QR-код пустой или не распознан');
+  }
+
+  const value = raw.trim();
+  if (!value.toLowerCase().startsWith('otpauth://')) {
+    throw new Error('Поддерживаются только QR-коды формата otpauth://');
+  }
+
+  const url = new URL(value);
+  if (url.protocol !== 'otpauth:' || url.hostname.toLowerCase() !== 'totp') {
+    throw new Error('Поддерживаются только TOTP QR-коды');
+  }
+
+  const label = decodeURIComponent(url.pathname.replace(/^\//, ''));
+  const [labelIssuer = '', ...rest] = label.split(':');
+  const labelAccount = rest.join(':').trim();
+
+  const secret = (url.searchParams.get('secret') || '').replace(/\s+/g, '').toUpperCase();
+  if (!secret) {
+    throw new Error('В QR-коде отсутствует секрет');
+  }
+
+  const issuer = (url.searchParams.get('issuer') || labelIssuer || '').trim();
+  const accountName = (labelAccount || label || '').trim();
+
+  return { issuer, accountName, secret };
+};
+
+const stopQrScanner = () => {
+  if (qrScanFrame) {
+    cancelAnimationFrame(qrScanFrame);
+    qrScanFrame = null;
+  }
+
+  if (qrStream) {
+    qrStream.getTracks().forEach((track) => track.stop());
+    qrStream = null;
+  }
+
+  if (els.qrVideo) {
+    els.qrVideo.srcObject = null;
+  }
+
+  if (els.qrModal) {
+    els.qrModal.classList.add('hidden');
+    els.qrModal.setAttribute('aria-hidden', 'true');
+  }
+};
+
+const handleScannedValue = (value) => {
+  const parsed = parseOtpAuthUri(value);
+  const issuerEl = document.getElementById('issuer');
+  const accountEl = document.getElementById('account-name');
+  const secretEl = document.getElementById('secret');
+
+  issuerEl.value = parsed.issuer || issuerEl.value;
+  accountEl.value = parsed.accountName || accountEl.value;
+  secretEl.value = parsed.secret;
+
+  stopQrScanner();
+  setStatus('QR-код распознан, поля заполнены', 'success');
+};
+
+const startQrScanLoop = async () => {
+  if (typeof BarcodeDetector === 'undefined') {
+    setStatus('Сканирование QR не поддерживается в этом браузере', 'error');
+    stopQrScanner();
+    return;
+  }
+
+  const detector = new BarcodeDetector({ formats: ['qr_code'] });
+
+  const tick = async () => {
+    if (!els.qrVideo || els.qrVideo.readyState < 2) {
+      qrScanFrame = requestAnimationFrame(() => tick().catch(() => {}));
+      return;
+    }
+
+    try {
+      const codes = await detector.detect(els.qrVideo);
+      if (codes.length > 0 && codes[0].rawValue) {
+        handleScannedValue(codes[0].rawValue);
+        return;
+      }
+    } catch {
+      setStatus('Не удалось распознать QR-код', 'error');
+      stopQrScanner();
+      return;
+    }
+
+    qrScanFrame = requestAnimationFrame(() => tick().catch(() => {}));
+  };
+
+  qrScanFrame = requestAnimationFrame(() => tick().catch(() => {}));
+};
+
+const openQrScanner = async () => {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setStatus('Камера недоступна в этом браузере', 'error');
+    return;
+  }
+
+  try {
+    qrStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false
+    });
+
+    els.qrVideo.srcObject = qrStream;
+    await els.qrVideo.play();
+
+    els.qrModal.classList.remove('hidden');
+    els.qrModal.setAttribute('aria-hidden', 'false');
+    setStatus('Наведи камеру на QR-код', 'loading');
+    await startQrScanLoop();
+  } catch {
+    stopQrScanner();
+    setStatus('Не удалось открыть камеру. Проверь разрешения браузера.', 'error');
+  }
+};
+
 const renderAccounts = async () => {
   els.accountsList.innerHTML = '';
 
@@ -512,6 +642,22 @@ document.getElementById('unlock-btn').addEventListener('click', async () => {
   if (!password) return;
   state.masterPassword = password;
   await renderAccounts();
+});
+
+els.scanQrBtn.addEventListener('click', async () => {
+  await openQrScanner();
+});
+
+els.qrCloseBtn.addEventListener('click', () => {
+  stopQrScanner();
+  setStatus('Сканирование отменено');
+});
+
+els.qrModal.addEventListener('click', (event) => {
+  if (event.target === els.qrModal) {
+    stopQrScanner();
+    setStatus('Сканирование отменено');
+  }
 });
 
 els.accountsList.addEventListener('click', async (event) => {
