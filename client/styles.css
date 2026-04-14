@@ -358,6 +358,10 @@ button:hover {
   z-index: 20;
 }
 
+.qr-modal.hidden {
+  display: none;
+}
+
 .qr-modal-content {
   width: min(520px, 100%);
   background: #fff;

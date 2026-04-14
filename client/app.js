@@ -479,6 +479,11 @@ const startQrScanLoop = async () => {
 };
 
 const openQrScanner = async () => {
+  if (els.appView.classList.contains('hidden')) {
+    setStatus('Сканирование доступно после входа в аккаунт', 'error');
+    return;
+  }
+
   if (!navigator.mediaDevices?.getUserMedia) {
     setStatus('Камера недоступна в этом браузере', 'error');
     return;
@@ -735,6 +740,8 @@ setInterval(() => {
     renderAccounts().catch(() => {});
   }
 }, 1000);
+
+stopQrScanner();
 
 if (state.accessToken) {
   showApp().catch(() => showAuth());
