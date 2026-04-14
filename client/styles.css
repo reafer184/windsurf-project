@@ -284,6 +284,26 @@ button:hover {
   background: #eef2ff;
 }
 
+.code-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.delete-btn {
+  width: auto;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 999px;
+  background: #fff;
+  color: #a61b1b;
+  border: 1px solid #f0c2c2;
+}
+
+.delete-btn:hover {
+  background: #fff1f1;
+}
+
 .code-progress {
   height: 6px;
   background: #ebefff;

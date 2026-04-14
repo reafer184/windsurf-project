@@ -404,7 +404,10 @@ const renderAccounts = async () => {
         <div class="code">${code}</div>
         <div class="code-meta">
           <span>Обновится через ${remaining}с</span>
-          <button class="copy-btn" type="button" data-code="${code}" ${copyDisabled ? 'disabled' : ''}>Копировать</button>
+          <div class="code-actions">
+            <button class="copy-btn" type="button" data-code="${code}" ${copyDisabled ? 'disabled' : ''}>Копировать</button>
+            <button class="delete-btn" type="button" data-id="${account.id}">Удалить</button>
+          </div>
         </div>
         <div class="code-progress"><span style="width:${progressPercent}%"></span></div>
       </div>
@@ -514,6 +517,25 @@ document.getElementById('unlock-btn').addEventListener('click', async () => {
 els.accountsList.addEventListener('click', async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
+
+  if (target.classList.contains('delete-btn')) {
+    const id = target.dataset.id;
+    if (!id) return;
+
+    const confirmed = window.confirm('Удалить этот аккаунт?');
+    if (!confirmed) return;
+
+    try {
+      await api(`/accounts/${id}`, { method: 'DELETE' });
+      state.accounts = state.accounts.filter((account) => account.id !== id);
+      await renderAccounts();
+      setStatus('Аккаунт удалён', 'success');
+    } catch (error) {
+      setStatus(error.message, 'error');
+    }
+    return;
+  }
+
   if (!target.classList.contains('copy-btn')) return;
 
   const code = target.dataset.code;
