@@ -88,3 +88,34 @@ cd pwa
 python3 -m http.server 8080
 # Откройте http://localhost:8080
 ```
+
+## iOS приложение (.ipa)
+
+Можно скомпилировать в нативное iOS приложение через **Capacitor**:
+
+```bash
+# На macOS с Xcode:
+./build-ios.sh
+# или
+npm run ios:add
+npm run ios:open  # Откроет Xcode
+```
+
+Подробная инструкция: [IOS_BUILD.md](IOS_BUILD.md)
+
+**Требуется:**
+- macOS + Xcode
+- Apple ID (бесплатно для установки на свой телефон)
+- Apple Developer ($99/год только для App Store)
+
+**Преимущества .ipa над PWA:**
+- Нативная камера (быстрее сканирует QR)
+- Keychain для хранения (безопаснее IndexedDB)
+- Face ID / Touch ID можно добавить
+- Работает без Safari
+
+**Также поддерживается Android (.apk):**
+```bash
+npm run android:add
+npm run android:open  # Android Studio
+```

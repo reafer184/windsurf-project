@@ -1,0 +1,22 @@
+{
+  "appId": "ru.totp.authenticator",
+  "appName": "TOTP Authenticator",
+  "webDir": ".",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "plugins": {
+    "Camera": {
+      "permissions": ["camera"]
+    },
+    "Preferences": {}
+  },
+  "ios": {
+    "contentInset": "automatic",
+    "allowsLinkPreview": false,
+    "scrollEnabled": true,
+    "webviewSuspendingDelay": 0
+  }
+}

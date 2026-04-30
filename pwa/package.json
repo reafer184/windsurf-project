@@ -1,0 +1,28 @@
+{
+  "name": "pwa",
+  "version": "1.0.0",
+  "description": "Автономный генератор TOTP кодов (как Google Authenticator), работающий полностью в браузере без сервера.",
+  "main": "app.js",
+  "scripts": {
+    "build": "echo 'No build step needed for vanilla JS'",
+    "sync": "npx cap sync",
+    "ios:add": "npx cap add ios",
+    "ios:open": "npx cap open ios",
+    "ios:build": "npx cap sync && npx cap build ios",
+    "android:add": "npx cap add android",
+    "android:open": "npx cap open android",
+    "android:build": "npx cap sync && npx cap build android",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@capacitor/android": "^8.3.1",
+    "@capacitor/camera": "^8.2.0",
+    "@capacitor/cli": "^8.3.1",
+    "@capacitor/core": "^8.3.1",
+    "@capacitor/ios": "^8.3.1",
+    "@capacitor/preferences": "^8.0.1"
+  }
+}
