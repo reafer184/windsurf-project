@@ -1,0 +1,19 @@
+{
+  "name": "TOTP Authenticator",
+  "short_name": "TOTP",
+  "description": "Автономный генератор TOTP кодов. Всё хранится локально на устройстве.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f6fb",
+  "theme_color": "#ff6b4a",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect fill='%23ff6b4a' rx='24' width='192' height='192'/%3E%3Ctext x='96' y='130' font-size='110' text-anchor='middle'%3E🔐%3C/text%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ],
+  "categories": ["security", "productivity"],
+  "lang": "ru"
+}

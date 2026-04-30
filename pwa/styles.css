@@ -1,0 +1,493 @@
+/* Client-only TOTP Authenticator Styles */
+
+:root {
+  --bg: #f4f6fb;
+  --bg-accent: #e4ebff;
+  --card: rgba(255, 255, 255, 0.92);
+  --text: #172034;
+  --muted: #5f6f94;
+  --line: #d6dff5;
+  --brand: #ff6b4a;
+  --brand-hover: #ef5b39;
+  --brand-soft: #ffe1d8;
+  --success: #22c55e;
+  --error: #ef4444;
+  --shadow: 0 20px 45px rgba(28, 41, 73, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Manrope', 'Segoe UI', system-ui, sans-serif;
+  background:
+    radial-gradient(1000px 500px at 10% -5%, var(--bg-accent), transparent 70%),
+    linear-gradient(145deg, #f8faff 0%, var(--bg) 70%);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+.app-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 32px 20px 60px;
+}
+
+/* Header */
+.app-header {
+  text-align: center;
+  margin-bottom: 32px;
+  animation: fadeUp 0.45s ease both;
+}
+
+.app-header h1 {
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 700;
+  margin: 0 0 8px;
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  color: var(--muted);
+  font-size: 15px;
+  margin: 0;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+/* View sections */
+.view {
+  animation: fadeUp 0.45s ease both;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Lock Screen */
+.lock-screen {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 48px 32px;
+  text-align: center;
+  backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+}
+
+.lock-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.lock-screen p {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 24px;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 20px;
+  max-width: 400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Buttons */
+.btn-primary, .btn-secondary {
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  padding: 12px 20px;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-primary {
+  background: var(--brand);
+  color: #fff;
+  border-color: var(--brand);
+}
+
+.btn-primary:hover {
+  background: var(--brand-hover);
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background: #fff;
+  color: var(--text);
+}
+
+.btn-secondary:hover {
+  background: #eef2ff;
+}
+
+.btn-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.btn-close:hover {
+  background: #f0f0f0;
+}
+
+/* Toolbar */
+.toolbar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+  padding: 16px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  backdrop-filter: blur(12px);
+}
+
+.toolbar button {
+  flex: 1;
+  min-width: 120px;
+}
+
+/* Sections */
+.accounts-section, .add-section {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 24px;
+  margin-bottom: 20px;
+  backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+}
+
+.accounts-section h2, .add-section h2 {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0 0 16px;
+}
+
+/* Accounts List */
+.accounts-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.locked-hint {
+  text-align: center;
+  color: var(--muted);
+  padding: 40px 20px;
+  font-style: italic;
+}
+
+.account-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  transition: transform 0.2s ease;
+}
+
+.account-item:hover {
+  transform: translateX(4px);
+}
+
+.account-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.issuer {
+  font-weight: 600;
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.account-name {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.code-section {
+  min-width: 140px;
+  text-align: center;
+}
+
+.totp-code {
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text);
+  line-height: 1;
+  margin-bottom: 8px;
+}
+
+.progress-bar {
+  height: 4px;
+  background: #ebefff;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.progress {
+  height: 100%;
+  background: linear-gradient(90deg, #7ea0ff, #5f7de0);
+  transition: width 0.3s linear;
+}
+
+.code-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.account-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.btn-copy, .btn-delete {
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.btn-copy {
+  background: #fff;
+  color: var(--text);
+}
+
+.btn-copy:hover {
+  background: #eef2ff;
+}
+
+.btn-delete {
+  background: #fff;
+  color: var(--error);
+  border-color: #fecaca;
+  padding: 8px 14px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.btn-delete:hover {
+  background: #fef2f2;
+}
+
+/* Form */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-row {
+  display: flex;
+  gap: 12px;
+}
+
+.form-row input {
+  flex: 1;
+}
+
+input[type="text"],
+input[type="email"] {
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  padding: 12px 14px;
+  font-size: 15px;
+  font-family: inherit;
+  background: #ffffff;
+  color: var(--text);
+  transition: all 0.2s ease;
+}
+
+input:focus {
+  outline: none;
+  border-color: #9bb2f3;
+  box-shadow: 0 0 0 4px rgba(89, 122, 221, 0.15);
+}
+
+.form-hint {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+/* Modal */
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(12, 16, 29, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 100;
+  backdrop-filter: blur(4px);
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-content {
+  width: min(480px, 100%);
+  background: #fff;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.modal-body {
+  padding: 20px;
+}
+
+#qr-video {
+  width: 100%;
+  max-height: 320px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #0f172a;
+}
+
+.scan-hint {
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+  margin: 16px 0 0;
+}
+
+/* Footer */
+.app-footer {
+  text-align: center;
+  margin-top: 32px;
+}
+
+#status {
+  min-height: 24px;
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.status-error {
+  color: var(--error);
+}
+
+.status-success {
+  color: var(--success);
+}
+
+.disclaimer {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+/* Animations */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .app-container {
+    padding: 20px 16px 40px;
+  }
+
+  .toolbar {
+    flex-direction: column;
+  }
+
+  .toolbar button {
+    width: 100%;
+  }
+
+  .form-row {
+    flex-direction: column;
+  }
+
+  .account-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .code-section {
+    width: 100%;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .progress-bar {
+    flex: 1;
+    margin-bottom: 0;
+  }
+
+  .totp-code {
+    font-size: 28px;
+  }
+
+  .account-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
