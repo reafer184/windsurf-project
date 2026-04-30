@@ -4,7 +4,12 @@ services:
     environment:
       POSTGRES_DB: totp_auth
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required in .env}
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d totp_auth']
+      interval: 5s
+      timeout: 5s
+      retries: 10
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./server/src/prisma-init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -13,16 +18,18 @@ services:
 
   api:
     build: ./server
+    command: sh -c "npx prisma db push && node dist/server.js"
     environment:
-      DATABASE_URL: postgresql://postgres:${DB_PASSWORD:-postgres}@db:5432/totp_auth
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-change_me_access_secret_32_chars_minimum}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change_me_refresh_secret_32_chars_min}
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD:?DB_PASSWORD is required in .env}@db:5432/totp_auth
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required in .env}
       PORT: 3000
       NODE_ENV: production
       BCRYPT_ROUNDS: 12
       CORS_ORIGIN: '*'
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     ports:
       - '127.0.0.1:3000:3000'
 

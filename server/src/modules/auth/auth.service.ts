@@ -69,7 +69,18 @@ export const login = async (input: LoginInput) => {
     throw new HttpError(401, 'INVALID_CREDENTIALS', 'Неверный email или пароль');
   }
 
-  const valid = await comparePassword(input.password, user.passwordHash);
+  let valid = false;
+
+  try {
+    valid = await comparePassword(input.password, user.passwordHash);
+  } catch (error) {
+    console.error('Password hash compare failed:', {
+      userId: user.id,
+      email: user.email,
+      error
+    });
+    throw new HttpError(401, 'INVALID_CREDENTIALS', 'Неверный email или пароль');
+  }
 
   if (!valid) {
     throw new HttpError(401, 'INVALID_CREDENTIALS', 'Неверный email или пароль');
