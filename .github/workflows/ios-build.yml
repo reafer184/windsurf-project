@@ -176,6 +176,8 @@ jobs:
   build-android:
     name: Build Android App (.apk)
     runs-on: ubuntu-latest
+    env:
+      HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE != '' }}
     
     steps:
       - name: Checkout code
@@ -220,7 +222,7 @@ jobs:
           ./gradlew assembleRelease
 
       - name: Sign APK (if keystore provided)
-        if: secrets.ANDROID_KEYSTORE != ''
+        if: env.HAS_KEYSTORE == 'true'
         env:
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
