@@ -3,13 +3,14 @@
  * Caches static assets for offline use
  */
 
-const CACHE_NAME = 'totp-pwa-v1';
+const CACHE_NAME = 'totp-pwa-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/styles.css',
   '/app.js',
   '/db.js',
+  '/gost.js',
   '/manifest.json'
 ];
 
@@ -32,7 +33,6 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Network-first for navigation, cache-first for static assets
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request)
@@ -45,8 +45,6 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
-
-  // Cache-first for static assets
   event.respondWith(
     caches.match(event.request)
       .then(cached => cached || fetch(event.request))

@@ -1,14 +1,16 @@
 import { store } from './db.js';
+import { gostEncrypt, gostDecrypt } from './gost.js';
 
 /**
  * Client-only TOTP Authenticator
- * No server required - works entirely in browser
- * Compatible with Google Authenticator / RFC 6238
+ * Encryption: GOST R 34.12-2015 Grasshopper (Kuznyechik) CTR + OMAC
+ * KDF: Streebog-256 (GOST R 34.11-2012) stretch 100k iterations
+ * TOTP: RFC 6238 / HMAC-SHA1 (required by standard)
+ * All data stays local — no server, no network
  */
 
 const state = {
   masterPassword: sessionStorage.getItem('master_pass') || '',
-  accounts: [],
   isUnlocked: false
 };
 
@@ -33,91 +35,19 @@ let qrStream = null;
 let qrScanFrame = null;
 let updateInterval = null;
 
-// Service Worker registration for offline support
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js')
     .then(reg => console.log('SW registered:', reg.scope))
-    .catch(err => console.log('SW registration failed:', err));
+    .catch(err => console.warn('SW registration failed:', err));
 }
 
-// Status display
 const setStatus = (msg, type = 'info') => {
   els.status.textContent = msg;
   els.status.className = '';
   if (type) els.status.classList.add(`status-${type}`);
 };
 
-// ── Crypto helpers (Web Crypto API: PBKDF2 + AES-GCM) ──────────────────────
-const toBase64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
-const fromBase64 = (b64) => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-
-const isCryptoAvailable = () =>
-  Boolean(
-    globalThis.crypto?.subtle &&
-    typeof globalThis.crypto.getRandomValues === 'function' &&
-    window.isSecureContext
-  );
-
-// Fallback: simple XOR for non-HTTPS environments (e.g. local file://)
-const _xorDeriveKey = (password) => {
-  let hash = 0;
-  const str = password + 'totp-salt-v1';
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash) + str.charCodeAt(i);
-    hash = hash & hash;
-  }
-  return Math.abs(hash).toString(16).padStart(16, '0');
-};
-
-const _xorEncrypt = (text, password) => {
-  const key = _xorDeriveKey(password);
-  const tb = new TextEncoder().encode(text);
-  const kb = new TextEncoder().encode(key);
-  const r = new Uint8Array(tb.length);
-  for (let i = 0; i < tb.length; i++) r[i] = tb[i] ^ kb[i % kb.length];
-  return toBase64(r);
-};
-
-const _xorDecrypt = (encrypted, password) => {
-  const key = _xorDeriveKey(password);
-  const eb = fromBase64(encrypted);
-  const kb = new TextEncoder().encode(key);
-  const r = new Uint8Array(eb.length);
-  for (let i = 0; i < eb.length; i++) r[i] = eb[i] ^ kb[i % kb.length];
-  return new TextDecoder().decode(r);
-};
-
-const _pbkdf2Key = async (password) => {
-  const enc = new TextEncoder();
-  const raw = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
-  return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt: enc.encode('totp-static-salt-v2'), iterations: 310000, hash: 'SHA-256' },
-    raw,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt']
-  );
-};
-
-const encrypt = async (text, password) => {
-  if (!isCryptoAvailable()) {
-    return { ciphertext: _xorEncrypt(text, password), iv: 'xor-fallback' };
-  }
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await _pbkdf2Key(password);
-  const enc = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(text));
-  return { ciphertext: toBase64(enc), iv: toBase64(iv) };
-};
-
-const decrypt = async (ciphertext, iv, password) => {
-  if (iv === 'xor-fallback') return _xorDecrypt(ciphertext, password);
-  if (!isCryptoAvailable()) throw new Error('Расшифровка требует HTTPS. Откройте приложение по защищённому адресу.');
-  const key = await _pbkdf2Key(password);
-  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromBase64(iv) }, key, fromBase64(ciphertext));
-  return new TextDecoder().decode(plain);
-};
-
-// ── Base32 / TOTP ───────────────────────────────────────────────────────────
+// ── Base32 / TOTP ─────────────────────────────────────────────────────────────
 const base32ToBytes = (input) => {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
   const clean = input.toUpperCase().replace(/=+$/g, '').replace(/\s/g, '');
@@ -143,28 +73,27 @@ const sha1 = (bytes) => {
   const view = new DataView(padded.buffer);
   view.setUint32(totalLen - 8, Math.floor(bitLen / 0x100000000), false);
   view.setUint32(totalLen - 4, bitLen >>> 0, false);
-  let h0 = 0x67452301, h1 = 0xEFCDAB89, h2 = 0x98BADCFE, h3 = 0x10325476, h4 = 0xC3D2E1F0;
+  let h0=0x67452301,h1=0xEFCDAB89,h2=0x98BADCFE,h3=0x10325476,h4=0xC3D2E1F0;
   for (let offset = 0; offset < totalLen; offset += 64) {
     const w = new Uint32Array(80);
-    for (let i = 0; i < 16; i++) w[i] = view.getUint32(offset + i * 4, false);
-    for (let i = 16; i < 80; i++) w[i] = rotl((w[i-3] ^ w[i-8] ^ w[i-14] ^ w[i-16]) >>> 0, 1);
-    let a = h0, b = h1, c = h2, d = h3, e = h4;
-    for (let i = 0; i < 80; i++) {
-      let f, k;
-      if (i < 20)      { f = (b & c) | (~b & d); k = 0x5A827999; }
-      else if (i < 40) { f = b ^ c ^ d;           k = 0x6ED9EBA1; }
-      else if (i < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8F1BBCDC; }
-      else             { f = b ^ c ^ d;           k = 0xCA62C1D6; }
-      const temp = (rotl(a, 5) + (f >>> 0) + e + k + w[i]) >>> 0;
-      e = d; d = c; c = rotl(b, 30); b = a; a = temp;
+    for (let i=0;i<16;i++) w[i]=view.getUint32(offset+i*4,false);
+    for (let i=16;i<80;i++) w[i]=rotl((w[i-3]^w[i-8]^w[i-14]^w[i-16])>>>0,1);
+    let a=h0,b=h1,c=h2,d=h3,e=h4;
+    for (let i=0;i<80;i++) {
+      let f,k;
+      if(i<20){f=(b&c)|(~b&d);k=0x5A827999;}
+      else if(i<40){f=b^c^d;k=0x6ED9EBA1;}
+      else if(i<60){f=(b&c)|(b&d)|(c&d);k=0x8F1BBCDC;}
+      else{f=b^c^d;k=0xCA62C1D6;}
+      const temp=(rotl(a,5)+(f>>>0)+e+k+w[i])>>>0;
+      e=d;d=c;c=rotl(b,30);b=a;a=temp;
     }
-    h0 = (h0 + a) >>> 0; h1 = (h1 + b) >>> 0;
-    h2 = (h2 + c) >>> 0; h3 = (h3 + d) >>> 0; h4 = (h4 + e) >>> 0;
+    h0=(h0+a)>>>0;h1=(h1+b)>>>0;h2=(h2+c)>>>0;h3=(h3+d)>>>0;h4=(h4+e)>>>0;
   }
-  const out = new Uint8Array(20);
-  const ov = new DataView(out.buffer);
-  ov.setUint32(0, h0, false); ov.setUint32(4, h1, false);
-  ov.setUint32(8, h2, false); ov.setUint32(12, h3, false); ov.setUint32(16, h4, false);
+  const out=new Uint8Array(20);
+  const ov=new DataView(out.buffer);
+  ov.setUint32(0,h0,false);ov.setUint32(4,h1,false);
+  ov.setUint32(8,h2,false);ov.setUint32(12,h3,false);ov.setUint32(16,h4,false);
   return out;
 };
 
@@ -172,16 +101,14 @@ const hmacSha1 = (key, message) => {
   const blockSize = 64;
   if (key.length > blockSize) key = sha1(key);
   if (key.length < blockSize) {
-    const padded = new Uint8Array(blockSize);
-    padded.set(key);
-    key = padded;
+    const padded = new Uint8Array(blockSize); padded.set(key); key = padded;
   }
   const ipad = new Uint8Array(blockSize + message.length);
   const opad = new Uint8Array(blockSize + 20);
-  for (let i = 0; i < blockSize; i++) { ipad[i] = key[i] ^ 0x36; opad[i] = key[i] ^ 0x5C; }
+  for (let i=0;i<blockSize;i++){ipad[i]=key[i]^0x36;opad[i]=key[i]^0x5C;}
   ipad.set(message, blockSize);
-  const innerHash = sha1(ipad);
-  opad.set(innerHash, blockSize);
+  const inner = sha1(ipad);
+  opad.set(inner, blockSize);
   return sha1(opad);
 };
 
@@ -189,18 +116,45 @@ const hotp = (secret, counter) => {
   const keyBytes = base32ToBytes(secret);
   const view = new DataView(new ArrayBuffer(8));
   view.setUint32(4, counter);
-  const message = new Uint8Array(view.buffer);
-  const hmac = hmacSha1(keyBytes, message);
+  const hmac = hmacSha1(keyBytes, new Uint8Array(view.buffer));
   const offset = hmac[hmac.length - 1] & 0xf;
-  const code = ((hmac[offset] & 0x7f) << 24) | ((hmac[offset+1] & 0xff) << 16) |
-               ((hmac[offset+2] & 0xff) << 8)  |  (hmac[offset+3] & 0xff);
+  const code = ((hmac[offset]&0x7f)<<24)|((hmac[offset+1]&0xff)<<16)|
+               ((hmac[offset+2]&0xff)<<8)|(hmac[offset+3]&0xff);
   return String(code % 1000000).padStart(6, '0');
 };
 
 const totp = (secret, period = 30) => hotp(secret, Math.floor(Date.now() / 1000 / period));
 const getRemainingSeconds = (period) => period - (Math.floor(Date.now() / 1000) % period);
 
-// ── QR Scanner ──────────────────────────────────────────────────────────────
+// ── Encrypt / decrypt wrappers ────────────────────────────────────────────────
+const encryptSecret = async (secret, password) => {
+  // KDF занимает ~1-2 сек из-за 100к итераций Стрибог — показываем статус
+  setStatus('Шифрование ГОСТ...', 'info');
+  const result = await gostEncrypt(secret, password);
+  setStatus('');
+  return result; // { ciphertext, iv, mac, algo }
+};
+
+const decryptSecret = async (account, password) => {
+  if (account.algo === 'GOST-R-34.12-2015') {
+    return gostDecrypt(account.secretEnc, account.iv, account.mac, password);
+  }
+  // Legacy XOR fallback for old records
+  const key = (() => {
+    let hash = 0;
+    const str = password + 'totp-salt-v1';
+    for (let i = 0; i < str.length; i++) { hash = ((hash << 5) - hash) + str.charCodeAt(i); hash = hash & hash; }
+    return Math.abs(hash).toString(16).padStart(16, '0');
+  })();
+  const fromB64 = b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const eb = fromB64(account.secretEnc);
+  const kb = new TextEncoder().encode(key);
+  const r = new Uint8Array(eb.length);
+  for (let i = 0; i < eb.length; i++) r[i] = eb[i] ^ kb[i % kb.length];
+  return new TextDecoder().decode(r);
+};
+
+// ── QR Scanner ────────────────────────────────────────────────────────────────
 const parseOtpAuthUri = (raw) => {
   if (!raw || typeof raw !== 'string') throw new Error('QR-код пустой');
   const value = raw.trim();
@@ -239,10 +193,7 @@ const startQrScanLoop = async () => {
   }
   const detector = new BarcodeDetector({ formats: ['qr_code'] });
   const tick = async () => {
-    if (!els.qrVideo || els.qrVideo.readyState < 2) {
-      qrScanFrame = requestAnimationFrame(tick);
-      return;
-    }
+    if (!els.qrVideo || els.qrVideo.readyState < 2) { qrScanFrame = requestAnimationFrame(tick); return; }
     try {
       const codes = await detector.detect(els.qrVideo);
       if (codes.length > 0 && codes[0].rawValue) {
@@ -254,24 +205,18 @@ const startQrScanLoop = async () => {
         setStatus('QR-код распознан', 'success');
         return;
       }
-    } catch (e) {
-      setStatus(e.message, 'error');
-      stopQrScanner();
-      return;
-    }
+    } catch (e) { setStatus(e.message, 'error'); stopQrScanner(); return; }
     qrScanFrame = requestAnimationFrame(tick);
   };
   qrScanFrame = requestAnimationFrame(tick);
 };
 
-// ── UI rendering ────────────────────────────────────────────────────────────
-// Only re-render code values & progress bars each tick, not entire DOM
+// ── UI rendering ──────────────────────────────────────────────────────────────
 const renderAccounts = async (fullRender = true) => {
   if (!state.isUnlocked) {
     els.accountsList.innerHTML = '<p class="locked-hint">🔒 Нажмите "Разблокировать" для просмотра кодов</p>';
     return;
   }
-
   const accounts = await store.getAllAccounts();
   accounts.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
@@ -281,20 +226,16 @@ const renderAccounts = async (fullRender = true) => {
       const li = document.createElement('li');
       li.className = 'account-item';
       li.dataset.id = account.id;
-
       const remaining = getRemainingSeconds(account.period || 30);
       const progressPercent = (remaining / (account.period || 30)) * 100;
-
       let code = '••••••';
-      try {
-        const secret = await decrypt(account.secretEnc, account.iv || 'xor-fallback', state.masterPassword);
-        code = totp(secret, account.period || 30);
-      } catch { code = 'ERR'; }
-
+      try { code = totp(await decryptSecret(account, state.masterPassword), account.period || 30); }
+      catch { code = 'ERR'; }
       li.innerHTML = `
         <div class="account-info">
           <div class="issuer">${account.issuer || 'Unknown'}</div>
           <div class="account-name">${account.accountName || ''}</div>
+          <div class="account-algo">🔐 ГОСТ Р 34.12-2015</div>
         </div>
         <div class="code-section">
           <div class="totp-code" data-code-el>${code}</div>
@@ -309,7 +250,7 @@ const renderAccounts = async (fullRender = true) => {
       els.accountsList.appendChild(li);
     }
   } else {
-    // Fast path: only update codes and timers in-place
+    // Fast path: only update codes/timers in place
     const items = els.accountsList.querySelectorAll('.account-item');
     for (let idx = 0; idx < accounts.length; idx++) {
       const account = accounts[idx];
@@ -318,10 +259,8 @@ const renderAccounts = async (fullRender = true) => {
       const remaining = getRemainingSeconds(account.period || 30);
       const progressPercent = (remaining / (account.period || 30)) * 100;
       let code = '••••••';
-      try {
-        const secret = await decrypt(account.secretEnc, account.iv || 'xor-fallback', state.masterPassword);
-        code = totp(secret, account.period || 30);
-      } catch { code = 'ERR'; }
+      try { code = totp(await decryptSecret(account, state.masterPassword), account.period || 30); }
+      catch { code = 'ERR'; }
       const codeEl = li.querySelector('[data-code-el]');
       const timerEl = li.querySelector('[data-timer-el]');
       const progressEl = li.querySelector('.progress');
@@ -334,7 +273,7 @@ const renderAccounts = async (fullRender = true) => {
   }
 };
 
-// ── Event handlers ──────────────────────────────────────────────────────────
+// ── Event handlers ────────────────────────────────────────────────────────────
 const unlockApp = () => {
   const pass = prompt('Введите мастер-пароль:');
   if (!pass) return;
@@ -375,7 +314,7 @@ const exportAccounts = async () => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `totp-backup-${new Date().toISOString().split('T')[0]}.json`;
+  a.download = `totp-backup-gost-${new Date().toISOString().split('T')[0]}.json`;
   a.click();
   URL.revokeObjectURL(url);
   setStatus('Экспорт выполнен', 'success');
@@ -387,12 +326,10 @@ const importAccounts = async (file) => {
     await store.importAll(text);
     await renderAccounts(true);
     setStatus('Импорт выполнен', 'success');
-  } catch (e) {
-    setStatus('Ошибка импорта: ' + e.message, 'error');
-  }
+  } catch (e) { setStatus('Ошибка импорта: ' + e.message, 'error'); }
 };
 
-// ── Init ────────────────────────────────────────────────────────────────────
+// ── Init ──────────────────────────────────────────────────────────────────────
 const init = async () => {
   await store.init();
 
@@ -422,15 +359,17 @@ const init = async () => {
     const secret = document.getElementById('secret').value.trim().toUpperCase();
     if (!issuer || !secret) { setStatus('Заполните обязательные поля', 'error'); return; }
     try {
-      base32ToBytes(secret); // validate
-      const { ciphertext, iv } = await encrypt(secret, state.masterPassword);
-      await store.addAccount({ issuer, accountName, secretEnc: ciphertext, iv, digits: 6, period: 30, algorithm: 'SHA1' });
+      base32ToBytes(secret); // validate base32
+      const { ciphertext, iv, mac, algo } = await encryptSecret(secret, state.masterPassword);
+      await store.addAccount({
+        issuer, accountName,
+        secretEnc: ciphertext, iv, mac, algo,
+        digits: 6, period: 30, algorithm: 'SHA1'
+      });
       els.addForm.reset();
       await renderAccounts(true);
-      setStatus('Аккаунт добавлен', 'success');
-    } catch (e) {
-      setStatus('Ошибка: ' + e.message, 'error');
-    }
+      setStatus('Аккаунт добавлен (ГОСТ Р 34.12-2015)', 'success');
+    } catch (e) { setStatus('Ошибка: ' + e.message, 'error'); }
   });
 
   els.accountsList?.addEventListener('click', async (e) => {
@@ -453,7 +392,6 @@ const init = async () => {
     }
   });
 
-  // Tick every second — fast path only updates text/progress, not DOM
   updateInterval = setInterval(() => {
     if (state.isUnlocked) renderAccounts(false);
   }, 1000);
