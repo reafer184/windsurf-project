@@ -17,18 +17,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
           cache-dependency-path: pwa/package-lock.json
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '21'
 
       - name: Install npm deps
         working-directory: pwa
@@ -37,11 +37,6 @@ jobs:
       - name: Sync Capacitor
         working-directory: pwa
         run: npx cap sync android
-
-      - name: Add CAMERA permission to AndroidManifest
-        run: |
-          sed -i 's|<uses-permission android:name="android.permission.INTERNET" />|<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.CAMERA" />|' \
-            pwa/android/app/src/main/AndroidManifest.xml
 
       - name: Build debug APK
         working-directory: pwa/android
