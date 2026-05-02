@@ -12,7 +12,6 @@ import { gostEncrypt, gostDecrypt } from './gost.js';
 const state = {
   masterPassword: sessionStorage.getItem('master_pass') || '',
   isUnlocked: false,
-  // Cache: accountId -> decrypted secret string (cleared on lock)
   secretCache: new Map()
 };
 
@@ -22,6 +21,7 @@ const els = {
   unlockBtn:     document.getElementById('unlock-btn'),
   lockBtn:       document.getElementById('lock-btn'),
   addForm:       document.getElementById('add-account-form'),
+  addBtn:        document.getElementById('add-btn'),
   qrModal:       document.getElementById('qr-modal'),
   qrVideo:       document.getElementById('qr-video'),
   qrCloseBtn:    document.getElementById('qr-close-btn'),
@@ -43,7 +43,6 @@ const isCapacitorNative = () =>
   typeof window.Capacitor !== 'undefined' &&
   window.Capacitor.isNativePlatform();
 
-// Get Camera plugin from window.Capacitor.Plugins (correct way for Capacitor 5+)
 const getCapCamera = () => {
   if (!isCapacitorNative()) return null;
   return window?.Capacitor?.Plugins?.Camera ?? null;
@@ -55,10 +54,17 @@ if ('serviceWorker' in navigator && !isCapacitorNative()) {
     .catch(err => console.warn('SW registration failed:', err));
 }
 
+// ── Status + button helpers ───────────────────────────────────────────────────
 const setStatus = (msg, type = 'info') => {
   els.status.textContent = msg;
   els.status.className   = '';
   if (type) els.status.classList.add(`status-${type}`);
+};
+
+const setAddBtnLoading = (loading) => {
+  if (!els.addBtn) return;
+  els.addBtn.disabled    = loading;
+  els.addBtn.textContent = loading ? 'Шифрование... (~15с)' : 'Добавить';
 };
 
 // ── Base32 / TOTP ────────────────────────────────────────────────────────────
@@ -136,15 +142,7 @@ const totp = (secret, period=30) => hotp(secret, Math.floor(Date.now()/1000/peri
 const getRemainingSeconds = (period) => period-(Math.floor(Date.now()/1000)%period);
 
 // ── GOST encrypt / decrypt ─────────────────────────────────────────────────
-const encryptSecret = async (secret, password) => {
-  setStatus('Шифрование ГОСТ...', 'info');
-  const result = await gostEncrypt(secret, password);
-  setStatus('');
-  return result;
-};
-
 const decryptSecret = async (account, password) => {
-  // Check cache first — avoid re-running GOST on every timer tick
   const cacheKey = `${account.id}`;
   if (state.secretCache.has(cacheKey)) return state.secretCache.get(cacheKey);
 
@@ -152,7 +150,6 @@ const decryptSecret = async (account, password) => {
   if (account.algo === 'GOST-R-34.12-2015') {
     plaintext = await gostDecrypt(account.secretEnc, account.iv, account.mac, password);
   } else {
-    // Legacy XOR fallback
     const key = (() => {
       let hash=0; const str=password+'totp-salt-v1';
       for(let i=0;i<str.length;i++){hash=((hash<<5)-hash)+str.charCodeAt(i);hash=hash&hash;}
@@ -199,75 +196,42 @@ const fillFormFromParsed = (parsed) => {
 };
 
 // ── QR Scanner ────────────────────────────────────────────────────────────────
-
 const scanQrNative = async () => {
   const Camera = getCapCamera();
-  if (!Camera) {
-    setStatus('Нативная камера недоступна', 'error');
-    return false;
-  }
+  if (!Camera) { setStatus('Нативная камера недоступна', 'error'); return false; }
   try {
-    // CameraResultType and CameraSource are string enums in Capacitor 5+
-    const photo = await Camera.getPhoto({
-      quality:      90,
-      allowEditing: false,
-      resultType:   'base64',
-      source:       'CAMERA'
-    });
-
+    const photo = await Camera.getPhoto({ quality: 90, allowEditing: false, resultType: 'base64', source: 'CAMERA' });
     const base64 = photo.base64String;
     if (!base64) throw new Error('Камера не вернула фото');
-
     const imgEl = new Image();
-    await new Promise((resolve, reject) => {
-      imgEl.onload = resolve;
-      imgEl.onerror = reject;
-      imgEl.src = `data:image/jpeg;base64,${base64}`;
-    });
-
+    await new Promise((resolve, reject) => { imgEl.onload = resolve; imgEl.onerror = reject; imgEl.src = `data:image/jpeg;base64,${base64}`; });
     if (typeof BarcodeDetector !== 'undefined') {
-      const detector = new BarcodeDetector({ formats: ['qr_code'] });
-      const codes = await detector.detect(imgEl);
-      if (codes.length > 0) {
-        fillFormFromParsed(parseOtpAuthUri(codes[0].rawValue));
-        return true;
-      }
-      throw new Error('Не удалось распознать QR-код на фото — попробуйте ещё раз');
+      const codes = await new BarcodeDetector({ formats: ['qr_code'] }).detect(imgEl);
+      if (codes.length > 0) { fillFormFromParsed(parseOtpAuthUri(codes[0].rawValue)); return true; }
+      throw new Error('Не удалось распознать QR-код — попробуйте ещё раз');
     }
-
     throw new Error('BarcodeDetector недоступен на этом устройстве');
-  } catch (e) {
-    setStatus(e.message, 'error');
-    return false;
-  }
+  } catch (e) { setStatus(e.message, 'error'); return false; }
 };
 
 const stopQrScanner = () => {
   if (qrScanFrame) { cancelAnimationFrame(qrScanFrame); qrScanFrame = null; }
   if (qrStream) { qrStream.getTracks().forEach(t => t.stop()); qrStream = null; }
   if (els.qrVideo) els.qrVideo.srcObject = null;
-  if (els.qrModal) {
-    els.qrModal.classList.add('hidden');
-    els.qrModal.setAttribute('aria-hidden', 'true');
-  }
+  if (els.qrModal) { els.qrModal.classList.add('hidden'); els.qrModal.setAttribute('aria-hidden', 'true'); }
 };
 
 const startQrScanLoop = async () => {
   if (typeof BarcodeDetector === 'undefined') {
-    setStatus('Сканирование QR не поддерживается в этом браузере — введите секрет вручную', 'error');
-    stopQrScanner();
-    return;
+    setStatus('Сканирование QR не поддерживается — введите секрет вручную', 'error');
+    stopQrScanner(); return;
   }
   const detector = new BarcodeDetector({ formats: ['qr_code'] });
   const tick = async () => {
     if (!els.qrVideo || els.qrVideo.readyState < 2) { qrScanFrame = requestAnimationFrame(tick); return; }
     try {
       const codes = await detector.detect(els.qrVideo);
-      if (codes.length > 0 && codes[0].rawValue) {
-        fillFormFromParsed(parseOtpAuthUri(codes[0].rawValue));
-        stopQrScanner();
-        return;
-      }
+      if (codes.length > 0 && codes[0].rawValue) { fillFormFromParsed(parseOtpAuthUri(codes[0].rawValue)); stopQrScanner(); return; }
     } catch (e) { setStatus(e.message, 'error'); stopQrScanner(); return; }
     qrScanFrame = requestAnimationFrame(tick);
   };
@@ -275,14 +239,8 @@ const startQrScanLoop = async () => {
 };
 
 const openQrScanner = async () => {
-  if (isCapacitorNative()) {
-    await scanQrNative();
-    return;
-  }
-  if (!navigator.mediaDevices?.getUserMedia) {
-    setStatus('Камера недоступна — откройте сайт по HTTPS', 'error');
-    return;
-  }
+  if (isCapacitorNative()) { await scanQrNative(); return; }
+  if (!navigator.mediaDevices?.getUserMedia) { setStatus('Камера недоступна — откройте сайт по HTTPS', 'error'); return; }
   try {
     qrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
     els.qrVideo.srcObject = qrStream;
@@ -331,7 +289,6 @@ const renderAccounts = async (fullRender = true) => {
       els.accountsList.appendChild(li);
     }
   } else {
-    // Fast path: update codes/timers in-place, no DOM rebuild, no decryption (uses cache)
     const items = els.accountsList.querySelectorAll('.account-item');
     for (let idx=0; idx<accounts.length; idx++) {
       const account = accounts[idx], li = items[idx];
@@ -356,7 +313,7 @@ const unlockApp = () => {
   if (!pass) return;
   state.masterPassword = pass;
   state.isUnlocked     = true;
-  state.secretCache.clear(); // clear stale cache from previous session
+  state.secretCache.clear();
   sessionStorage.setItem('master_pass', pass);
   els.lockedView.classList.add('hidden');
   els.unlockedView.classList.remove('hidden');
@@ -367,7 +324,7 @@ const unlockApp = () => {
 const lockApp = () => {
   state.masterPassword = '';
   state.isUnlocked     = false;
-  state.secretCache.clear(); // wipe decrypted secrets from memory
+  state.secretCache.clear();
   sessionStorage.removeItem('master_pass');
   els.lockedView.classList.remove('hidden');
   els.unlockedView.classList.add('hidden');
@@ -380,10 +337,8 @@ const exportAccounts = async () => {
   const blob = new Blob([data], { type: 'application/json' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
-  a.href     = url;
-  a.download = `totp-backup-gost-${new Date().toISOString().split('T')[0]}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
+  a.href=url; a.download=`totp-backup-gost-${new Date().toISOString().split('T')[0]}.json`;
+  a.click(); URL.revokeObjectURL(url);
   setStatus('Экспорт выполнен', 'success');
 };
 
@@ -427,14 +382,20 @@ const init = async () => {
     const secret      = document.getElementById('secret').value.trim().toUpperCase();
     if (!issuer || !secret) { setStatus('Заполните обязательные поля', 'error'); return; }
     try {
-      base32ToBytes(secret);
-      const { ciphertext, iv, mac, algo } = await encryptSecret(secret, state.masterPassword);
+      base32ToBytes(secret); // validate base32 before expensive KDF
+      setAddBtnLoading(true);
+      setStatus('Шифрование ГОСТ... (~15с, не закрывайте)', 'info');
+      const { ciphertext, iv, mac, algo } = await gostEncrypt(secret, state.masterPassword);
       await store.addAccount({ issuer, accountName, secretEnc: ciphertext, iv, mac, algo, digits: 6, period: 30, algorithm: 'SHA1' });
       els.addForm.reset();
-      state.secretCache.clear(); // invalidate cache after adding new account
+      state.secretCache.clear();
       await renderAccounts(true);
       setStatus('Аккаунт добавлен (ГОСТ Р 34.12-2015)', 'success');
-    } catch (e) { setStatus('Ошибка: '+e.message, 'error'); }
+    } catch (e) {
+      setStatus('Ошибка: '+e.message, 'error');
+    } finally {
+      setAddBtnLoading(false);
+    }
   });
 
   els.accountsList?.addEventListener('click', async (e) => {
