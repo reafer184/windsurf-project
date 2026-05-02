@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#0f172a">
+  <meta name="theme-color" content="#ff6b4a">
   <title>TOTP Authenticator</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -40,7 +40,7 @@
 
       <div class="accounts-section">
         <h2>Мои аккаунты</h2>
-        <ul id="accounts-list" class="accounts-list">
+        <ul id="accounts-list" class="accounts-list" aria-live="polite">
           <!-- Accounts rendered here -->
         </ul>
       </div>
@@ -49,11 +49,11 @@
         <h2>Добавить вручную</h2>
         <form id="add-account-form" class="form">
           <div class="form-row">
-            <input type="text" id="issuer" placeholder="Сервис (например: Google)" required>
-            <input type="text" id="account-name" placeholder="Аккаунт (например: user@gmail.com)">
+            <input type="text" id="issuer" placeholder="Сервис (например: Google)" required autocomplete="off">
+            <input type="text" id="account-name" placeholder="Аккаунт (например: user@gmail.com)" autocomplete="off">
           </div>
           <div class="form-row">
-            <input type="text" id="secret" placeholder="Секрет (Base32, например: JBSWY3DPEHPK3PXP)" required pattern="[A-Z2-7\s]+" minlength="16">
+            <input type="text" id="secret" placeholder="Секрет Base32 (например: JBSWY3DPEHPK3PXP)" required pattern="[A-Z2-7=\s]+" minlength="16" autocomplete="off" spellcheck="false">
             <button type="submit" class="btn-primary">Добавить</button>
           </div>
           <p class="form-hint">Секрет можно получить из QR-кода или в настройках 2FA сервиса</p>
@@ -62,11 +62,11 @@
     </section>
 
     <!-- QR Scanner Modal -->
-    <div id="qr-modal" class="modal hidden" aria-hidden="true">
+    <div id="qr-modal" class="modal hidden" aria-hidden="true" role="dialog" aria-label="Сканирование QR-кода">
       <div class="modal-content">
         <div class="modal-header">
           <h3>Сканирование QR-кода</h3>
-          <button id="qr-close-btn" class="btn-close">×</button>
+          <button id="qr-close-btn" class="btn-close" aria-label="Закрыть сканер">×</button>
         </div>
         <div class="modal-body">
           <video id="qr-video" autoplay playsinline muted></video>

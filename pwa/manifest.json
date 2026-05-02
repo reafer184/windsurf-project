@@ -9,9 +9,16 @@
   "orientation": "portrait",
   "icons": [
     {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect fill='%23ff6b4a' rx='24' width='192' height='192'/%3E%3Ctext x='96' y='130' font-size='110' text-anchor='middle'%3E🔐%3C/text%3E%3C/svg%3E",
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect fill='%23ff6b4a' rx='24' width='192' height='192'/%3E%3Ctext x='96' y='130' font-size='110' text-anchor='middle'%3E%F0%9F%94%90%3C/text%3E%3C/svg%3E",
       "sizes": "192x192",
-      "type": "image/svg+xml"
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect fill='%23ff6b4a' rx='64' width='512' height='512'/%3E%3Ctext x='256' y='348' font-size='290' text-anchor='middle'%3E%F0%9F%94%90%3C/text%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
     }
   ],
   "categories": ["security", "productivity"],
