@@ -1,0 +1,263 @@
+name: Build iOS App (.ipa)
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'pwa/**'
+  workflow_dispatch:  # Manual trigger
+    inputs:
+      signing_type:
+        description: 'Signing type'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+          - development
+          - ad-hoc
+          - app-store
+
+env:
+  NODE_VERSION: '22'
+  XCODE_VERSION: '15.4'
+  BUNDLE_ID: 'ru.totp.authenticator'
+
+jobs:
+  build-ios:
+    name: Build iOS App
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: pwa/package-lock.json
+
+      - name: Setup Xcode
+        uses: maxim-c/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          cd pwa
+          npm ci
+
+      - name: Add iOS platform
+        run: |
+          cd pwa
+          if [ ! -d "ios" ]; then
+            npx cap add ios
+          fi
+
+      - name: Sync Capacitor
+        run: |
+          cd pwa
+          npx cap sync ios
+
+      # Optional: Setup code signing with secrets
+      # Uncomment and configure if you have Apple Developer account
+      # - name: Setup Code Signing
+      #   if: env.TEAM_ID != ''
+      #   env:
+      #     TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      #     P12_CERTIFICATE: ${{ secrets.APPLE_P12_CERTIFICATE }}
+      #     P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
+      #     PROVISIONING_PROFILE: ${{ secrets.APPLE_PROVISIONING_PROFILE }}
+      #   run: |
+      #     echo "Setting up code signing..."
+      #     # Import certificate
+      #     echo "$P12_CERTIFICATE" | base64 -d > certificate.p12
+      #     security create-keychain -p "${{ secrets.KEYCHAIN_PASSWORD }}" build.keychain
+      #     security default-keychain -s build.keychain
+      #     security unlock-keychain -p "${{ secrets.KEYCHAIN_PASSWORD }}" build.keychain
+      #     security import certificate.p12 -k build.keychain -P "$P12_PASSWORD" -T /usr/bin/codesign
+      #     security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${{ secrets.KEYCHAIN_PASSWORD }}" build.keychain
+      #     
+      #     # Import provisioning profile
+      #     mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+      #     echo "$PROVISIONING_PROFILE" | base64 -d > ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
+
+      - name: Build iOS Project (Unsigned/Simulator)
+        if: env.TEAM_ID == ''
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cd pwa/ios/App
+          
+          # Build for simulator (unsigned, for testing)
+          xcodebuild -workspace App.xcworkspace \
+            -scheme App \
+            -sdk iphonesimulator \
+            -configuration Release \
+            -derivedDataPath build \
+            clean build
+
+      - name: Build and Export .ipa (Signed)
+        if: env.TEAM_ID != ''
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          SIGNING_TYPE: ${{ github.event.inputs.signing_type || 'development' }}
+        run: |
+          cd pwa/ios/App
+          
+          # Create export options plist
+          cat > ExportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>${SIGNING_TYPE}</string>
+              <key>teamID</key>
+              <string>${TEAM_ID}</string>
+              <key>compileBitcode</key>
+              <false/>
+              <key>stripSwiftSymbols</key>
+              <true/>
+              <key>thinning</key>
+              <string>&lt;none&gt;</string>
+          </dict>
+          </plist>
+          EOF
+          
+          # Archive
+          xcodebuild -workspace App.xcworkspace \
+            -scheme App \
+            -sdk iphoneos \
+            -configuration Release \
+            -archivePath build/App.xcarchive \
+            clean archive
+          
+          # Export .ipa
+          xcodebuild -exportArchive \
+            -archivePath build/App.xcarchive \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath build/output
+          
+          # Rename with version
+          VERSION=$(date +%Y%m%d-%H%M%S)
+          mv build/output/*.ipa "build/output/TOTP-Authenticator-${VERSION}.ipa"
+
+      - name: Upload Unsigned Build (Simulator)
+        if: env.TEAM_ID == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-app
+          path: pwa/ios/App/build/Build/Products/Release-iphonesimulator/
+          retention-days: 7
+
+      - name: Upload .ipa Artifact (Signed)
+        if: env.TEAM_ID != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: TOTP-Authenticator-ipa
+          path: pwa/ios/App/build/output/*.ipa
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && env.TEAM_ID != ''
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ github.run_number }}
+          name: TOTP Authenticator v${{ github.run_number }}
+          files: pwa/ios/App/build/output/*.ipa
+          draft: false
+          prerelease: true
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-android:
+    name: Build Android App (.apk)
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: pwa/package-lock.json
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: |
+          cd pwa
+          npm ci
+
+      - name: Add Android platform
+        run: |
+          cd pwa
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+
+      - name: Sync Capacitor
+        run: |
+          cd pwa
+          npx cap sync android
+
+      - name: Build APK
+        run: |
+          cd pwa/android
+          ./gradlew assembleRelease
+
+      - name: Sign APK (if keystore provided)
+        if: secrets.ANDROID_KEYSTORE != ''
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE" | base64 -d > release.keystore
+          
+          # Find unsigned APK
+          UNSIGNED_APK=$(find pwa/android/app/build/outputs/apk/release -name "*.apk" | head -n1)
+          
+          # Sign APK
+          SIGNED_APK="pwa/android/app/build/outputs/apk/release/TOTP-Authenticator-signed.apk"
+          jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 \
+            -keystore release.keystore \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -keypass "$KEY_PASSWORD" \
+            "$UNSIGNED_APK" "$KEY_ALIAS"
+          
+          zipalign -v 4 "$UNSIGNED_APK" "$SIGNED_APK"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TOTP-Authenticator-apk
+          path: |
+            pwa/android/app/build/outputs/apk/release/*.apk
+          retention-days: 30
+
+      - name: Create GitHub Release (Android)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: android-v${{ github.run_number }}
+          name: TOTP Authenticator Android v${{ github.run_number }}
+          files: pwa/android/app/build/outputs/apk/release/*.apk
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
