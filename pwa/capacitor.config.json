@@ -1,7 +1,7 @@
 {
   "appId": "ru.totp.authenticator",
   "appName": "TOTP Authenticator",
-  "webDir": ".",
+  "webDir": "www",
   "bundledWebRuntime": false,
   "server": {
     "androidScheme": "https",
@@ -19,7 +19,6 @@
     "contentInset": "automatic",
     "allowsLinkPreview": false,
     "scrollEnabled": true,
-    "webviewSuspendingDelay": 0,
     "backgroundColor": "#f4f6fb",
     "statusBarStyle": "DARK_CONTENT"
   }
