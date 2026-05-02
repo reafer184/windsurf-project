@@ -5,6 +5,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,21 +30,24 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install deps & sync Capacitor
+      - name: Install npm deps
         working-directory: pwa
+        run: npm ci
+
+      - name: Sync Capacitor
+        working-directory: pwa
+        run: npx cap sync android
+
+      - name: Add CAMERA permission to AndroidManifest
         run: |
-          npm ci
-          npx cap add android || true
-          npx cap sync android
+          sed -i 's|<uses-permission android:name="android.permission.INTERNET" />|<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.CAMERA" />|' \
+            pwa/android/app/src/main/AndroidManifest.xml
 
       - name: Build debug APK
         working-directory: pwa/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
