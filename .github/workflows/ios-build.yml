@@ -39,7 +39,7 @@ jobs:
           cache-dependency-path: pwa/package-lock.json
 
       - name: Setup Xcode
-        uses: maxim-c/setup-xcode@v1
+        uses: maxim-allyn/setup-xcode@v1
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
 
@@ -207,19 +207,29 @@ jobs:
       - name: Add Android platform
         run: |
           cd pwa
+          ls -la
           if [ ! -d "android" ]; then
+            echo "Adding Android platform..."
             npx cap add android
+          else
+            echo "Android platform already exists"
           fi
+          ls -la android/ || echo "android directory not found"
 
       - name: Sync Capacitor
         run: |
           cd pwa
-          npx cap sync android
+          echo "Capacitor config:"
+          cat capacitor.config.json
+          echo "Syncing Android..."
+          npx cap sync android --verbose || npx cap sync android
 
       - name: Build APK
         run: |
           cd pwa/android
-          ./gradlew assembleRelease
+          ls -la
+          echo "Building with Gradle..."
+          ./gradlew assembleRelease --stacktrace
 
       - name: Sign APK (if keystore provided)
         if: env.HAS_KEYSTORE == 'true'
