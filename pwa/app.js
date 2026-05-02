@@ -3,10 +3,10 @@ import { gostEncrypt, gostDecrypt } from './gost.js';
 
 /**
  * Client-only TOTP Authenticator
- * Encryption: GOST R 34.12-2015 Grasshopper (Kuznyechik) CTR + OMAC
- * KDF: Streebog-256 (GOST R 34.11-2012) stretch 100k iterations
- * TOTP: RFC 6238 / HMAC-SHA1 (required by standard)
- * All data stays local — no server, no network
+ * Encryption: GOST R 34.12-2015 Grasshopper CTR + OMAC
+ * KDF:        Streebog-256 (GOST R 34.11-2012) x100k
+ * TOTP:       RFC 6238 / HMAC-SHA1
+ * Camera:     @capacitor/camera (iOS/Android native) with getUserMedia fallback (web)
  */
 
 const state = {
@@ -15,27 +15,47 @@ const state = {
 };
 
 const els = {
-  accountsList: document.getElementById('accounts-list'),
-  status: document.getElementById('status'),
-  unlockBtn: document.getElementById('unlock-btn'),
-  lockBtn: document.getElementById('lock-btn'),
-  addForm: document.getElementById('add-account-form'),
-  qrModal: document.getElementById('qr-modal'),
-  qrVideo: document.getElementById('qr-video'),
-  qrCloseBtn: document.getElementById('qr-close-btn'),
-  scanQrBtn: document.getElementById('scan-qr-btn'),
-  exportBtn: document.getElementById('export-btn'),
-  importBtn: document.getElementById('import-btn'),
-  importFile: document.getElementById('import-file'),
-  lockedView: document.getElementById('locked-view'),
-  unlockedView: document.getElementById('unlocked-view')
+  accountsList:  document.getElementById('accounts-list'),
+  status:        document.getElementById('status'),
+  unlockBtn:     document.getElementById('unlock-btn'),
+  lockBtn:       document.getElementById('lock-btn'),
+  addForm:       document.getElementById('add-account-form'),
+  qrModal:       document.getElementById('qr-modal'),
+  qrVideo:       document.getElementById('qr-video'),
+  qrCloseBtn:    document.getElementById('qr-close-btn'),
+  scanQrBtn:     document.getElementById('scan-qr-btn'),
+  exportBtn:     document.getElementById('export-btn'),
+  importBtn:     document.getElementById('import-btn'),
+  importFile:    document.getElementById('import-file'),
+  lockedView:    document.getElementById('locked-view'),
+  unlockedView:  document.getElementById('unlocked-view')
 };
 
-let qrStream = null;
-let qrScanFrame = null;
+let qrStream     = null;
+let qrScanFrame  = null;
 let updateInterval = null;
 
-if ('serviceWorker' in navigator) {
+// ── Platform detection ─────────────────────────────────────────────────────────
+let CapCamera      = null; // @capacitor/camera Camera
+let CapBarcodeScanner = null; // @capacitor-mlkit/barcode-scanning (optional)
+
+const isCapacitorNative = () =>
+  typeof window !== 'undefined' &&
+  typeof window.Capacitor !== 'undefined' &&
+  window.Capacitor.isNativePlatform();
+
+// Try to load Capacitor Camera plugin (available after `npx cap sync`)
+const loadCapacitorPlugins = async () => {
+  if (!isCapacitorNative()) return;
+  try {
+    const mod = await import('./node_modules/@capacitor/camera/dist/esm/index.js');
+    CapCamera = mod.Camera;
+  } catch {
+    // Plugin not bundled yet — will use getUserMedia fallback
+  }
+};
+
+if ('serviceWorker' in navigator && !isCapacitorNative()) {
   navigator.serviceWorker.register('sw.js')
     .then(reg => console.log('SW registered:', reg.scope))
     .catch(err => console.warn('SW registration failed:', err));
@@ -43,11 +63,11 @@ if ('serviceWorker' in navigator) {
 
 const setStatus = (msg, type = 'info') => {
   els.status.textContent = msg;
-  els.status.className = '';
+  els.status.className   = '';
   if (type) els.status.classList.add(`status-${type}`);
 };
 
-// ── Base32 / TOTP ─────────────────────────────────────────────────────────────
+// ── Base32 / TOTP ────────────────────────────────────────────────────────────
 const base32ToBytes = (input) => {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
   const clean = input.toUpperCase().replace(/=+$/g, '').replace(/\s/g, '');
@@ -65,9 +85,9 @@ const base32ToBytes = (input) => {
 
 const sha1 = (bytes) => {
   const rotl = (n, b) => ((n << b) | (n >>> (32 - b))) >>> 0;
-  const bitLen = bytes.length * 8;
+  const bitLen   = bytes.length * 8;
   const totalLen = (((bytes.length + 9 + 63) >> 6) << 6);
-  const padded = new Uint8Array(totalLen);
+  const padded   = new Uint8Array(totalLen);
   padded.set(bytes);
   padded[bytes.length] = 0x80;
   const view = new DataView(padded.buffer);
@@ -90,92 +110,146 @@ const sha1 = (bytes) => {
     }
     h0=(h0+a)>>>0;h1=(h1+b)>>>0;h2=(h2+c)>>>0;h3=(h3+d)>>>0;h4=(h4+e)>>>0;
   }
-  const out=new Uint8Array(20);
-  const ov=new DataView(out.buffer);
+  const out=new Uint8Array(20), ov=new DataView(out.buffer);
   ov.setUint32(0,h0,false);ov.setUint32(4,h1,false);
   ov.setUint32(8,h2,false);ov.setUint32(12,h3,false);ov.setUint32(16,h4,false);
   return out;
 };
 
 const hmacSha1 = (key, message) => {
-  const blockSize = 64;
-  if (key.length > blockSize) key = sha1(key);
-  if (key.length < blockSize) {
-    const padded = new Uint8Array(blockSize); padded.set(key); key = padded;
-  }
-  const ipad = new Uint8Array(blockSize + message.length);
-  const opad = new Uint8Array(blockSize + 20);
-  for (let i=0;i<blockSize;i++){ipad[i]=key[i]^0x36;opad[i]=key[i]^0x5C;}
-  ipad.set(message, blockSize);
-  const inner = sha1(ipad);
-  opad.set(inner, blockSize);
-  return sha1(opad);
+  const bs = 64;
+  if (key.length > bs) key = sha1(key);
+  if (key.length < bs) { const p=new Uint8Array(bs); p.set(key); key=p; }
+  const ip=new Uint8Array(bs+message.length), op=new Uint8Array(bs+20);
+  for(let i=0;i<bs;i++){ip[i]=key[i]^0x36;op[i]=key[i]^0x5C;}
+  ip.set(message,bs);
+  op.set(sha1(ip),bs);
+  return sha1(op);
 };
 
 const hotp = (secret, counter) => {
-  const keyBytes = base32ToBytes(secret);
-  const view = new DataView(new ArrayBuffer(8));
-  view.setUint32(4, counter);
-  const hmac = hmacSha1(keyBytes, new Uint8Array(view.buffer));
-  const offset = hmac[hmac.length - 1] & 0xf;
-  const code = ((hmac[offset]&0x7f)<<24)|((hmac[offset+1]&0xff)<<16)|
-               ((hmac[offset+2]&0xff)<<8)|(hmac[offset+3]&0xff);
-  return String(code % 1000000).padStart(6, '0');
+  const kv = base32ToBytes(secret);
+  const dv = new DataView(new ArrayBuffer(8));
+  dv.setUint32(4, counter);
+  const hmac  = hmacSha1(kv, new Uint8Array(dv.buffer));
+  const off   = hmac[hmac.length-1] & 0xf;
+  const code  = ((hmac[off]&0x7f)<<24)|((hmac[off+1]&0xff)<<16)|
+                ((hmac[off+2]&0xff)<<8)|(hmac[off+3]&0xff);
+  return String(code % 1000000).padStart(6,'0');
 };
 
-const totp = (secret, period = 30) => hotp(secret, Math.floor(Date.now() / 1000 / period));
-const getRemainingSeconds = (period) => period - (Math.floor(Date.now() / 1000) % period);
+const totp = (secret, period=30) => hotp(secret, Math.floor(Date.now()/1000/period));
+const getRemainingSeconds = (period) => period-(Math.floor(Date.now()/1000)%period);
 
-// ── Encrypt / decrypt wrappers ────────────────────────────────────────────────
+// ── GOST encrypt / decrypt ─────────────────────────────────────────────────
 const encryptSecret = async (secret, password) => {
-  // KDF занимает ~1-2 сек из-за 100к итераций Стрибог — показываем статус
   setStatus('Шифрование ГОСТ...', 'info');
   const result = await gostEncrypt(secret, password);
   setStatus('');
-  return result; // { ciphertext, iv, mac, algo }
+  return result;
 };
 
 const decryptSecret = async (account, password) => {
-  if (account.algo === 'GOST-R-34.12-2015') {
+  if (account.algo === 'GOST-R-34.12-2015')
     return gostDecrypt(account.secretEnc, account.iv, account.mac, password);
-  }
-  // Legacy XOR fallback for old records
+  // Legacy XOR fallback
   const key = (() => {
-    let hash = 0;
-    const str = password + 'totp-salt-v1';
-    for (let i = 0; i < str.length; i++) { hash = ((hash << 5) - hash) + str.charCodeAt(i); hash = hash & hash; }
-    return Math.abs(hash).toString(16).padStart(16, '0');
+    let hash=0; const str=password+'totp-salt-v1';
+    for(let i=0;i<str.length;i++){hash=((hash<<5)-hash)+str.charCodeAt(i);hash=hash&hash;}
+    return Math.abs(hash).toString(16).padStart(16,'0');
   })();
-  const fromB64 = b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-  const eb = fromB64(account.secretEnc);
-  const kb = new TextEncoder().encode(key);
-  const r = new Uint8Array(eb.length);
-  for (let i = 0; i < eb.length; i++) r[i] = eb[i] ^ kb[i % kb.length];
+  const fromB64 = b64=>Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
+  const eb=fromB64(account.secretEnc), kb=new TextEncoder().encode(key);
+  const r=new Uint8Array(eb.length);
+  for(let i=0;i<eb.length;i++) r[i]=eb[i]^kb[i%kb.length];
   return new TextDecoder().decode(r);
 };
 
-// ── QR Scanner ────────────────────────────────────────────────────────────────
+// ── QR parsing ─────────────────────────────────────────────────────────────────
 const parseOtpAuthUri = (raw) => {
   if (!raw || typeof raw !== 'string') throw new Error('QR-код пустой');
   const value = raw.trim();
-  if (!value.toLowerCase().startsWith('otpauth://')) throw new Error('Поддерживаются только QR-коды формата otpauth://');
+  if (!value.toLowerCase().startsWith('otpauth://')) throw new Error('Поддерживаются только QR-коды otpauth://');
   const url = new URL(value);
-  if (url.protocol !== 'otpauth:' || url.hostname.toLowerCase() !== 'totp') throw new Error('Поддерживаются только TOTP QR-коды');
-  const label = decodeURIComponent(url.pathname.replace(/^\//, ''));
-  const [labelIssuer = '', ...rest] = label.split(':');
-  const labelAccount = rest.join(':').trim();
-  const secret = (url.searchParams.get('secret') || '').replace(/\s+/g, '').toUpperCase();
+  if (url.protocol !== 'otpauth:' || url.hostname.toLowerCase() !== 'totp')
+    throw new Error('Поддерживаются только TOTP QR-коды');
+  const label       = decodeURIComponent(url.pathname.replace(/^\//, ''));
+  const [li='', ...rest] = label.split(':');
+  const secret = (url.searchParams.get('secret')||'').replace(/\s+/g,'').toUpperCase();
   if (!secret) throw new Error('В QR-коде отсутствует секрет');
   return {
-    issuer: (url.searchParams.get('issuer') || labelIssuer || '').trim(),
-    accountName: (labelAccount || label || '').trim(),
+    issuer:      (url.searchParams.get('issuer') || li || '').trim(),
+    accountName: (rest.join(':').trim() || label || '').trim(),
     secret,
-    period: parseInt(url.searchParams.get('period')) || 30,
-    digits: parseInt(url.searchParams.get('digits')) || 6,
+    period:    parseInt(url.searchParams.get('period'))  || 30,
+    digits:    parseInt(url.searchParams.get('digits'))  || 6,
     algorithm: (url.searchParams.get('algorithm') || 'SHA1').toUpperCase()
   };
 };
 
+// Fill form after successful QR parse
+const fillFormFromParsed = (parsed) => {
+  document.getElementById('issuer').value       = parsed.issuer;
+  document.getElementById('account-name').value = parsed.accountName;
+  document.getElementById('secret').value       = parsed.secret;
+  setStatus('QR-код распознан', 'success');
+};
+
+// ── QR Scanner: native (Capacitor) OR web (getUserMedia + BarcodeDetector) ──────────
+
+/**
+ * Native path: use @capacitor/camera to take a photo, then decode QR from it.
+ * Works on iOS (WKWebView) and Android where getUserMedia is blocked.
+ */
+const scanQrNative = async () => {
+  if (!CapCamera) {
+    setStatus('Нативная камера недоступна, перехожу на веб-режим', 'info');
+    return false;
+  }
+  try {
+    const { Camera: CameraResultType, CameraSource } = await import('./node_modules/@capacitor/camera/dist/esm/definitions.js');
+    const photo = await CapCamera.getPhoto({
+      quality:      90,
+      allowEditing: false,
+      resultType:   'base64',   // returns base64 string
+      source:       CameraSource?.Camera ?? 'CAMERA'
+    });
+
+    // Decode QR from base64 image using BarcodeDetector (Chromium) or canvas fallback
+    const base64 = photo.base64String;
+    if (!base64) throw new Error('Камера не вернула фото');
+
+    const imgEl = new Image();
+    await new Promise((resolve, reject) => {
+      imgEl.onload = resolve;
+      imgEl.onerror = reject;
+      imgEl.src = `data:image/jpeg;base64,${base64}`;
+    });
+
+    // Try BarcodeDetector first (Android WebView has it)
+    if (typeof BarcodeDetector !== 'undefined') {
+      const detector = new BarcodeDetector({ formats: ['qr_code'] });
+      const codes = await detector.detect(imgEl);
+      if (codes.length > 0) {
+        fillFormFromParsed(parseOtpAuthUri(codes[0].rawValue));
+        return true;
+      }
+      throw new Error('Не удалось распознать QR-код на фото');
+    }
+
+    // Canvas fallback: draw image, read pixels — placeholder for jsQR integration
+    // For production: bundle jsQR.js and call jsQR(imageData.data, w, h)
+    throw new Error('Для распознавания QR установите приложение через npx cap sync');
+  } catch (e) {
+    setStatus(e.message, 'error');
+    return false;
+  }
+};
+
+/**
+ * Web path: getUserMedia + BarcodeDetector live scan loop
+ * Used in browser (PWA), falls back gracefully if BarcodeDetector missing.
+ */
 const stopQrScanner = () => {
   if (qrScanFrame) { cancelAnimationFrame(qrScanFrame); qrScanFrame = null; }
   if (qrStream) { qrStream.getTracks().forEach(t => t.stop()); qrStream = null; }
@@ -188,7 +262,8 @@ const stopQrScanner = () => {
 
 const startQrScanLoop = async () => {
   if (typeof BarcodeDetector === 'undefined') {
-    setStatus('Сканирование QR не поддерживается в этом браузере', 'error');
+    setStatus('Сканирование QR не поддерживается в этом браузере — введите секрет вручную', 'error');
+    stopQrScanner();
     return;
   }
   const detector = new BarcodeDetector({ formats: ['qr_code'] });
@@ -197,18 +272,36 @@ const startQrScanLoop = async () => {
     try {
       const codes = await detector.detect(els.qrVideo);
       if (codes.length > 0 && codes[0].rawValue) {
-        const parsed = parseOtpAuthUri(codes[0].rawValue);
-        document.getElementById('issuer').value = parsed.issuer;
-        document.getElementById('account-name').value = parsed.accountName;
-        document.getElementById('secret').value = parsed.secret;
+        fillFormFromParsed(parseOtpAuthUri(codes[0].rawValue));
         stopQrScanner();
-        setStatus('QR-код распознан', 'success');
         return;
       }
     } catch (e) { setStatus(e.message, 'error'); stopQrScanner(); return; }
     qrScanFrame = requestAnimationFrame(tick);
   };
   qrScanFrame = requestAnimationFrame(tick);
+};
+
+const openQrScanner = async () => {
+  // ── Native path (iOS / Android via Capacitor)
+  if (isCapacitorNative()) {
+    await scanQrNative();
+    return;
+  }
+
+  // ── Web path
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setStatus('Камера недоступна — откройте сайт по HTTPS', 'error');
+    return;
+  }
+  try {
+    qrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+    els.qrVideo.srcObject = qrStream;
+    await els.qrVideo.play();
+    els.qrModal.classList.remove('hidden');
+    els.qrModal.setAttribute('aria-hidden', 'false');
+    startQrScanLoop();
+  } catch { setStatus('Не удалось открыть камеру', 'error'); }
 };
 
 // ── UI rendering ──────────────────────────────────────────────────────────────
@@ -218,23 +311,22 @@ const renderAccounts = async (fullRender = true) => {
     return;
   }
   const accounts = await store.getAllAccounts();
-  accounts.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+  accounts.sort((a, b) => (a.sortOrder||0)-(b.sortOrder||0));
 
   if (fullRender || els.accountsList.children.length !== accounts.length) {
     els.accountsList.innerHTML = '';
     for (const account of accounts) {
       const li = document.createElement('li');
-      li.className = 'account-item';
+      li.className  = 'account-item';
       li.dataset.id = account.id;
-      const remaining = getRemainingSeconds(account.period || 30);
-      const progressPercent = (remaining / (account.period || 30)) * 100;
+      const remaining      = getRemainingSeconds(account.period||30);
+      const progressPercent = (remaining/(account.period||30))*100;
       let code = '••••••';
-      try { code = totp(await decryptSecret(account, state.masterPassword), account.period || 30); }
-      catch { code = 'ERR'; }
+      try { code = totp(await decryptSecret(account, state.masterPassword), account.period||30); } catch { code='ERR'; }
       li.innerHTML = `
         <div class="account-info">
-          <div class="issuer">${account.issuer || 'Unknown'}</div>
-          <div class="account-name">${account.accountName || ''}</div>
+          <div class="issuer">${account.issuer||'Unknown'}</div>
+          <div class="account-name">${account.accountName||''}</div>
           <div class="account-algo">🔐 ГОСТ Р 34.12-2015</div>
         </div>
         <div class="code-section">
@@ -250,25 +342,21 @@ const renderAccounts = async (fullRender = true) => {
       els.accountsList.appendChild(li);
     }
   } else {
-    // Fast path: only update codes/timers in place
+    // Fast path: update codes/timers in-place, no DOM rebuild
     const items = els.accountsList.querySelectorAll('.account-item');
-    for (let idx = 0; idx < accounts.length; idx++) {
-      const account = accounts[idx];
-      const li = items[idx];
+    for (let idx=0; idx<accounts.length; idx++) {
+      const account = accounts[idx], li = items[idx];
       if (!li) continue;
-      const remaining = getRemainingSeconds(account.period || 30);
-      const progressPercent = (remaining / (account.period || 30)) * 100;
+      const remaining      = getRemainingSeconds(account.period||30);
+      const progressPercent = (remaining/(account.period||30))*100;
       let code = '••••••';
-      try { code = totp(await decryptSecret(account, state.masterPassword), account.period || 30); }
-      catch { code = 'ERR'; }
-      const codeEl = li.querySelector('[data-code-el]');
-      const timerEl = li.querySelector('[data-timer-el]');
-      const progressEl = li.querySelector('.progress');
-      const copyBtn = li.querySelector('.btn-copy');
-      if (codeEl) codeEl.textContent = code;
-      if (timerEl) timerEl.textContent = `${remaining}s`;
-      if (progressEl) progressEl.style.width = `${progressPercent}%`;
-      if (copyBtn) copyBtn.dataset.code = code;
+      try { code = totp(await decryptSecret(account, state.masterPassword), account.period||30); } catch { code='ERR'; }
+      const ce=li.querySelector('[data-code-el]'), te=li.querySelector('[data-timer-el]');
+      const pe=li.querySelector('.progress'),    cb=li.querySelector('.btn-copy');
+      if(ce) ce.textContent=code;
+      if(te) te.textContent=`${remaining}s`;
+      if(pe) pe.style.width=`${progressPercent}%`;
+      if(cb) cb.dataset.code=code;
     }
   }
 };
@@ -278,7 +366,7 @@ const unlockApp = () => {
   const pass = prompt('Введите мастер-пароль:');
   if (!pass) return;
   state.masterPassword = pass;
-  state.isUnlocked = true;
+  state.isUnlocked     = true;
   sessionStorage.setItem('master_pass', pass);
   els.lockedView.classList.add('hidden');
   els.unlockedView.classList.remove('hidden');
@@ -288,7 +376,7 @@ const unlockApp = () => {
 
 const lockApp = () => {
   state.masterPassword = '';
-  state.isUnlocked = false;
+  state.isUnlocked     = false;
   sessionStorage.removeItem('master_pass');
   els.lockedView.classList.remove('hidden');
   els.unlockedView.classList.add('hidden');
@@ -296,24 +384,12 @@ const lockApp = () => {
   setStatus('Заблокировано');
 };
 
-const openQrScanner = async () => {
-  if (!navigator.mediaDevices?.getUserMedia) { setStatus('Камера недоступна', 'error'); return; }
-  try {
-    qrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
-    els.qrVideo.srcObject = qrStream;
-    await els.qrVideo.play();
-    els.qrModal.classList.remove('hidden');
-    els.qrModal.setAttribute('aria-hidden', 'false');
-    startQrScanLoop();
-  } catch { setStatus('Не удалось открыть камеру', 'error'); }
-};
-
 const exportAccounts = async () => {
   const data = await store.exportAll();
   const blob = new Blob([data], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
   a.download = `totp-backup-gost-${new Date().toISOString().split('T')[0]}.json`;
   a.click();
   URL.revokeObjectURL(url);
@@ -326,11 +402,12 @@ const importAccounts = async (file) => {
     await store.importAll(text);
     await renderAccounts(true);
     setStatus('Импорт выполнен', 'success');
-  } catch (e) { setStatus('Ошибка импорта: ' + e.message, 'error'); }
+  } catch (e) { setStatus('Ошибка импорта: '+e.message, 'error'); }
 };
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 const init = async () => {
+  await loadCapacitorPlugins();
   await store.init();
 
   if (state.masterPassword) {
@@ -354,32 +431,26 @@ const init = async () => {
   els.addForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!state.isUnlocked) { setStatus('Сначала разблокируйте приложение', 'error'); return; }
-    const issuer = document.getElementById('issuer').value.trim();
+    const issuer      = document.getElementById('issuer').value.trim();
     const accountName = document.getElementById('account-name').value.trim();
-    const secret = document.getElementById('secret').value.trim().toUpperCase();
+    const secret      = document.getElementById('secret').value.trim().toUpperCase();
     if (!issuer || !secret) { setStatus('Заполните обязательные поля', 'error'); return; }
     try {
-      base32ToBytes(secret); // validate base32
+      base32ToBytes(secret);
       const { ciphertext, iv, mac, algo } = await encryptSecret(secret, state.masterPassword);
-      await store.addAccount({
-        issuer, accountName,
-        secretEnc: ciphertext, iv, mac, algo,
-        digits: 6, period: 30, algorithm: 'SHA1'
-      });
+      await store.addAccount({ issuer, accountName, secretEnc: ciphertext, iv, mac, algo, digits: 6, period: 30, algorithm: 'SHA1' });
       els.addForm.reset();
       await renderAccounts(true);
       setStatus('Аккаунт добавлен (ГОСТ Р 34.12-2015)', 'success');
-    } catch (e) { setStatus('Ошибка: ' + e.message, 'error'); }
+    } catch (e) { setStatus('Ошибка: '+e.message, 'error'); }
   });
 
   els.accountsList?.addEventListener('click', async (e) => {
     if (e.target.classList.contains('btn-copy')) {
       const code = e.target.dataset.code;
       if (code && code !== '••••••' && code !== 'ERR') {
-        try {
-          await navigator.clipboard.writeText(code);
-          setStatus('Код скопирован', 'success');
-        } catch { setStatus('Не удалось скопировать', 'error'); }
+        try { await navigator.clipboard.writeText(code); setStatus('Код скопирован', 'success'); }
+        catch { setStatus('Не удалось скопировать', 'error'); }
       }
     }
     if (e.target.classList.contains('btn-delete')) {
@@ -399,5 +470,5 @@ const init = async () => {
 
 init().catch(e => {
   console.error('Init failed:', e);
-  setStatus('Ошибка инициализации: ' + e.message, 'error');
+  setStatus('Ошибка инициализации: '+e.message, 'error');
 });

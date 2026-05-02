@@ -9,7 +9,9 @@
   },
   "plugins": {
     "Camera": {
-      "permissions": ["camera"]
+      "permissions": ["camera"],
+      "saveToGallery": false,
+      "presentationStyle": "fullscreen"
     },
     "Preferences": {}
   },
@@ -17,6 +19,8 @@
     "contentInset": "automatic",
     "allowsLinkPreview": false,
     "scrollEnabled": true,
-    "webviewSuspendingDelay": 0
+    "webviewSuspendingDelay": 0,
+    "backgroundColor": "#f4f6fb",
+    "statusBarStyle": "DARK_CONTENT"
   }
 }
