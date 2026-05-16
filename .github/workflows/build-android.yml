@@ -2,8 +2,13 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, feat/gost-streebog-totp ]
   workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to build'
+        required: false
+        default: 'feat/gost-streebog-totp'
 
 jobs:
   build:
