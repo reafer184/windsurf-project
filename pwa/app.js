@@ -1,13 +1,15 @@
 import { store } from './db.js';
-import { gostEncrypt, gostDecrypt } from './gost.js';
+import { gostEncrypt, gostDecrypt, streebog256 } from './gost.js';
 
 /**
- * Client-only TOTP Authenticator
+ * Client-only GOST TOTP Authenticator
  * Encryption: GOST R 34.12-2015 Grasshopper CTR + OMAC
  * KDF:        Streebog-256 (GOST R 34.11-2012) x100k
- * TOTP:       RFC 6238 / HMAC-SHA1
+ * TOTP:       RFC 6238 / HMAC-Streebog-256  ← ГОСТ-вариант, совместим с server_gost.py
  * Camera:     @capacitor/camera (iOS/Android native) with getUserMedia fallback (web)
  */
+
+const OTP_ALGORITHM = 'GOST_STREEBOG_256';
 
 const state = {
   masterPassword: sessionStorage.getItem('master_pass') || '',
@@ -36,15 +38,14 @@ let qrScanFrame  = null;
 let updateInterval = null;
 
 // ── Platform detection ─────────────────────────────────────────────────────────
-let CapCamera      = null; // @capacitor/camera Camera
-let CapBarcodeScanner = null; // @capacitor-mlkit/barcode-scanning (optional)
+let CapCamera      = null;
+let CapBarcodeScanner = null;
 
 const isCapacitorNative = () =>
   typeof window !== 'undefined' &&
   typeof window.Capacitor !== 'undefined' &&
   window.Capacitor.isNativePlatform();
 
-// Try to load Capacitor Camera plugin (available after `npx cap sync`)
 const loadCapacitorPlugins = async () => {
   if (!isCapacitorNative()) return;
   try {
@@ -67,7 +68,7 @@ const setStatus = (msg, type = 'info') => {
   if (type) els.status.classList.add(`status-${type}`);
 };
 
-// ── Base32 / TOTP ────────────────────────────────────────────────────────────
+// ── Base32 ────────────────────────────────────────────────────────────────────
 const base32ToBytes = (input) => {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
   const clean = input.toUpperCase().replace(/=+$/g, '').replace(/\s/g, '');
@@ -83,65 +84,62 @@ const base32ToBytes = (input) => {
   return new Uint8Array(bytes);
 };
 
-const sha1 = (bytes) => {
-  const rotl = (n, b) => ((n << b) | (n >>> (32 - b))) >>> 0;
-  const bitLen   = bytes.length * 8;
-  const totalLen = (((bytes.length + 9 + 63) >> 6) << 6);
-  const padded   = new Uint8Array(totalLen);
-  padded.set(bytes);
-  padded[bytes.length] = 0x80;
-  const view = new DataView(padded.buffer);
-  view.setUint32(totalLen - 8, Math.floor(bitLen / 0x100000000), false);
-  view.setUint32(totalLen - 4, bitLen >>> 0, false);
-  let h0=0x67452301,h1=0xEFCDAB89,h2=0x98BADCFE,h3=0x10325476,h4=0xC3D2E1F0;
-  for (let offset = 0; offset < totalLen; offset += 64) {
-    const w = new Uint32Array(80);
-    for (let i=0;i<16;i++) w[i]=view.getUint32(offset+i*4,false);
-    for (let i=16;i<80;i++) w[i]=rotl((w[i-3]^w[i-8]^w[i-14]^w[i-16])>>>0,1);
-    let a=h0,b=h1,c=h2,d=h3,e=h4;
-    for (let i=0;i<80;i++) {
-      let f,k;
-      if(i<20){f=(b&c)|(~b&d);k=0x5A827999;}
-      else if(i<40){f=b^c^d;k=0x6ED9EBA1;}
-      else if(i<60){f=(b&c)|(b&d)|(c&d);k=0x8F1BBCDC;}
-      else{f=b^c^d;k=0xCA62C1D6;}
-      const temp=(rotl(a,5)+(f>>>0)+e+k+w[i])>>>0;
-      e=d;d=c;c=rotl(b,30);b=a;a=temp;
-    }
-    h0=(h0+a)>>>0;h1=(h1+b)>>>0;h2=(h2+c)>>>0;h3=(h3+d)>>>0;h4=(h4+e)>>>0;
+// ── HMAC-Streebog-256 ─────────────────────────────────────────────────────────
+// Совместим с server_gost.py: gostcrypto.gosthmac.new('HMAC_GOSTR3411_2012_256', secret, msg)
+// RFC 2104: HMAC(K, m) = H((K ^ opad) || H((K ^ ipad) || m))
+// Размер блока Стрибог = 64 байта
+const hmacStreebog256 = (key, message) => {
+  const BLOCK_SIZE = 64;
+  // Если ключ длиннее блока — хэшируем его
+  let k = key.length > BLOCK_SIZE ? streebog256(key) : key;
+  // Если короче — дополняем нулями
+  if (k.length < BLOCK_SIZE) {
+    const padded = new Uint8Array(BLOCK_SIZE);
+    padded.set(k);
+    k = padded;
   }
-  const out=new Uint8Array(20), ov=new DataView(out.buffer);
-  ov.setUint32(0,h0,false);ov.setUint32(4,h1,false);
-  ov.setUint32(8,h2,false);ov.setUint32(12,h3,false);ov.setUint32(16,h4,false);
-  return out;
+  // ipad = 0x36, opad = 0x5C
+  const ipad = new Uint8Array(BLOCK_SIZE);
+  const opad = new Uint8Array(BLOCK_SIZE);
+  for (let i = 0; i < BLOCK_SIZE; i++) {
+    ipad[i] = k[i] ^ 0x36;
+    opad[i] = k[i] ^ 0x5C;
+  }
+  // inner = H(ipad || message)
+  const innerInput = new Uint8Array(BLOCK_SIZE + message.length);
+  innerInput.set(ipad);
+  innerInput.set(message, BLOCK_SIZE);
+  const innerHash = streebog256(innerInput);
+  // outer = H(opad || inner)
+  const outerInput = new Uint8Array(BLOCK_SIZE + innerHash.length);
+  outerInput.set(opad);
+  outerInput.set(innerHash, BLOCK_SIZE);
+  return streebog256(outerInput);
 };
 
-const hmacSha1 = (key, message) => {
-  const bs = 64;
-  if (key.length > bs) key = sha1(key);
-  if (key.length < bs) { const p=new Uint8Array(bs); p.set(key); key=p; }
-  const ip=new Uint8Array(bs+message.length), op=new Uint8Array(bs+20);
-  for(let i=0;i<bs;i++){ip[i]=key[i]^0x36;op[i]=key[i]^0x5C;}
-  ip.set(message,bs);
-  op.set(sha1(ip),bs);
-  return sha1(op);
-};
-
+// ── GOST TOTP (RFC 6238 механика + HMAC-Streebog-256) ─────────────────────────
+// Полностью совместим с hotp_gost() из server_gost.py
 const hotp = (secret, counter) => {
   const kv = base32ToBytes(secret);
+  // counter → 8 байт big-endian (struct.pack(">Q", counter) в Python)
   const dv = new DataView(new ArrayBuffer(8));
-  dv.setUint32(4, counter);
-  const hmac  = hmacSha1(kv, new Uint8Array(dv.buffer));
-  const off   = hmac[hmac.length-1] & 0xf;
-  const code  = ((hmac[off]&0x7f)<<24)|((hmac[off+1]&0xff)<<16)|
-                ((hmac[off+2]&0xff)<<8)|(hmac[off+3]&0xff);
-  return String(code % 1000000).padStart(6,'0');
+  dv.setUint32(0, Math.floor(counter / 0x100000000), false); // старшие 4 байта
+  dv.setUint32(4, counter >>> 0, false);                     // младшие 4 байта
+  const msg  = new Uint8Array(dv.buffer);
+  const hmac = hmacStreebog256(kv, msg);
+  // Dynamic truncation по RFC 4226: offset = hmac[-1] & 0x0F
+  const off  = hmac[hmac.length - 1] & 0x0f;
+  const code = ((hmac[off] & 0x7f) << 24) |
+               ((hmac[off + 1] & 0xff) << 16) |
+               ((hmac[off + 2] & 0xff) << 8)  |
+               (hmac[off + 3] & 0xff);
+  return String(code % 1000000).padStart(6, '0');
 };
 
-const totp = (secret, period=30) => hotp(secret, Math.floor(Date.now()/1000/period));
-const getRemainingSeconds = (period) => period-(Math.floor(Date.now()/1000)%period);
+const totp = (secret, period = 30) => hotp(secret, Math.floor(Date.now() / 1000 / period));
+const getRemainingSeconds = (period) => period - (Math.floor(Date.now() / 1000) % period);
 
-// ── GOST encrypt / decrypt ─────────────────────────────────────────────────
+// ── GOST encrypt / decrypt secrets ────────────────────────────────────────────
 const encryptSecret = async (secret, password) => {
   setStatus('Шифрование ГОСТ...', 'info');
   const result = await gostEncrypt(secret, password);
@@ -154,14 +152,14 @@ const decryptSecret = async (account, password) => {
     return gostDecrypt(account.secretEnc, account.iv, account.mac, password);
   // Legacy XOR fallback
   const key = (() => {
-    let hash=0; const str=password+'totp-salt-v1';
-    for(let i=0;i<str.length;i++){hash=((hash<<5)-hash)+str.charCodeAt(i);hash=hash&hash;}
-    return Math.abs(hash).toString(16).padStart(16,'0');
+    let hash = 0; const str = password + 'totp-salt-v1';
+    for (let i = 0; i < str.length; i++) { hash = ((hash << 5) - hash) + str.charCodeAt(i); hash = hash & hash; }
+    return Math.abs(hash).toString(16).padStart(16, '0');
   })();
-  const fromB64 = b64=>Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
-  const eb=fromB64(account.secretEnc), kb=new TextEncoder().encode(key);
-  const r=new Uint8Array(eb.length);
-  for(let i=0;i<eb.length;i++) r[i]=eb[i]^kb[i%kb.length];
+  const fromB64 = b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const eb = fromB64(account.secretEnc), kb = new TextEncoder().encode(key);
+  const r = new Uint8Array(eb.length);
+  for (let i = 0; i < eb.length; i++) r[i] = eb[i] ^ kb[i % kb.length];
   return new TextDecoder().decode(r);
 };
 
@@ -173,34 +171,30 @@ const parseOtpAuthUri = (raw) => {
   const url = new URL(value);
   if (url.protocol !== 'otpauth:' || url.hostname.toLowerCase() !== 'totp')
     throw new Error('Поддерживаются только TOTP QR-коды');
-  const label       = decodeURIComponent(url.pathname.replace(/^\//, ''));
-  const [li='', ...rest] = label.split(':');
-  const secret = (url.searchParams.get('secret')||'').replace(/\s+/g,'').toUpperCase();
+  const label  = decodeURIComponent(url.pathname.replace(/^\//, ''));
+  const [li = '', ...rest] = label.split(':');
+  const secret = (url.searchParams.get('secret') || '').replace(/\s+/g, '').toUpperCase();
   if (!secret) throw new Error('В QR-коде отсутствует секрет');
+  // Принимаем algorithm=GOST_STREEBOG_256 (от server_gost.py) и SHA1 (стандартный)
+  const algorithm = (url.searchParams.get('algorithm') || 'GOST_STREEBOG_256').toUpperCase();
   return {
     issuer:      (url.searchParams.get('issuer') || li || '').trim(),
     accountName: (rest.join(':').trim() || label || '').trim(),
     secret,
     period:    parseInt(url.searchParams.get('period'))  || 30,
     digits:    parseInt(url.searchParams.get('digits'))  || 6,
-    algorithm: (url.searchParams.get('algorithm') || 'SHA1').toUpperCase()
+    algorithm
   };
 };
 
-// Fill form after successful QR parse
 const fillFormFromParsed = (parsed) => {
   document.getElementById('issuer').value       = parsed.issuer;
   document.getElementById('account-name').value = parsed.accountName;
   document.getElementById('secret').value       = parsed.secret;
-  setStatus('QR-код распознан', 'success');
+  setStatus(`QR-код распознан (алгоритм: ${parsed.algorithm})`, 'success');
 };
 
-// ── QR Scanner: native (Capacitor) OR web (getUserMedia + BarcodeDetector) ──────────
-
-/**
- * Native path: use @capacitor/camera to take a photo, then decode QR from it.
- * Works on iOS (WKWebView) and Android where getUserMedia is blocked.
- */
+// ── QR Scanner ─────────────────────────────────────────────────────────────────
 const scanQrNative = async () => {
   if (!CapCamera) {
     setStatus('Нативная камера недоступна, перехожу на веб-режим', 'info');
@@ -211,22 +205,17 @@ const scanQrNative = async () => {
     const photo = await CapCamera.getPhoto({
       quality:      90,
       allowEditing: false,
-      resultType:   'base64',   // returns base64 string
+      resultType:   'base64',
       source:       CameraSource?.Camera ?? 'CAMERA'
     });
-
-    // Decode QR from base64 image using BarcodeDetector (Chromium) or canvas fallback
     const base64 = photo.base64String;
     if (!base64) throw new Error('Камера не вернула фото');
-
     const imgEl = new Image();
     await new Promise((resolve, reject) => {
       imgEl.onload = resolve;
       imgEl.onerror = reject;
       imgEl.src = `data:image/jpeg;base64,${base64}`;
     });
-
-    // Try BarcodeDetector first (Android WebView has it)
     if (typeof BarcodeDetector !== 'undefined') {
       const detector = new BarcodeDetector({ formats: ['qr_code'] });
       const codes = await detector.detect(imgEl);
@@ -236,9 +225,6 @@ const scanQrNative = async () => {
       }
       throw new Error('Не удалось распознать QR-код на фото');
     }
-
-    // Canvas fallback: draw image, read pixels — placeholder for jsQR integration
-    // For production: bundle jsQR.js and call jsQR(imageData.data, w, h)
     throw new Error('Для распознавания QR установите приложение через npx cap sync');
   } catch (e) {
     setStatus(e.message, 'error');
@@ -246,10 +232,6 @@ const scanQrNative = async () => {
   }
 };
 
-/**
- * Web path: getUserMedia + BarcodeDetector live scan loop
- * Used in browser (PWA), falls back gracefully if BarcodeDetector missing.
- */
 const stopQrScanner = () => {
   if (qrScanFrame) { cancelAnimationFrame(qrScanFrame); qrScanFrame = null; }
   if (qrStream) { qrStream.getTracks().forEach(t => t.stop()); qrStream = null; }
@@ -283,13 +265,10 @@ const startQrScanLoop = async () => {
 };
 
 const openQrScanner = async () => {
-  // ── Native path (iOS / Android via Capacitor)
   if (isCapacitorNative()) {
     await scanQrNative();
     return;
   }
-
-  // ── Web path
   if (!navigator.mediaDevices?.getUserMedia) {
     setStatus('Камера недоступна — откройте сайт по HTTPS', 'error');
     return;
@@ -311,7 +290,7 @@ const renderAccounts = async (fullRender = true) => {
     return;
   }
   const accounts = await store.getAllAccounts();
-  accounts.sort((a, b) => (a.sortOrder||0)-(b.sortOrder||0));
+  accounts.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
   if (fullRender || els.accountsList.children.length !== accounts.length) {
     els.accountsList.innerHTML = '';
@@ -319,15 +298,15 @@ const renderAccounts = async (fullRender = true) => {
       const li = document.createElement('li');
       li.className  = 'account-item';
       li.dataset.id = account.id;
-      const remaining      = getRemainingSeconds(account.period||30);
-      const progressPercent = (remaining/(account.period||30))*100;
+      const remaining       = getRemainingSeconds(account.period || 30);
+      const progressPercent = (remaining / (account.period || 30)) * 100;
       let code = '••••••';
-      try { code = totp(await decryptSecret(account, state.masterPassword), account.period||30); } catch { code='ERR'; }
+      try { code = totp(await decryptSecret(account, state.masterPassword), account.period || 30); } catch { code = 'ERR'; }
       li.innerHTML = `
         <div class="account-info">
-          <div class="issuer">${account.issuer||'Unknown'}</div>
-          <div class="account-name">${account.accountName||''}</div>
-          <div class="account-algo">🔐 ГОСТ Р 34.12-2015</div>
+          <div class="issuer">${account.issuer || 'Unknown'}</div>
+          <div class="account-name">${account.accountName || ''}</div>
+          <div class="account-algo">🔐 HMAC-Стрибог-256 (ГОСТ Р 34.11-2012)</div>
         </div>
         <div class="code-section">
           <div class="totp-code" data-code-el>${code}</div>
@@ -342,21 +321,20 @@ const renderAccounts = async (fullRender = true) => {
       els.accountsList.appendChild(li);
     }
   } else {
-    // Fast path: update codes/timers in-place, no DOM rebuild
     const items = els.accountsList.querySelectorAll('.account-item');
-    for (let idx=0; idx<accounts.length; idx++) {
+    for (let idx = 0; idx < accounts.length; idx++) {
       const account = accounts[idx], li = items[idx];
       if (!li) continue;
-      const remaining      = getRemainingSeconds(account.period||30);
-      const progressPercent = (remaining/(account.period||30))*100;
+      const remaining       = getRemainingSeconds(account.period || 30);
+      const progressPercent = (remaining / (account.period || 30)) * 100;
       let code = '••••••';
-      try { code = totp(await decryptSecret(account, state.masterPassword), account.period||30); } catch { code='ERR'; }
-      const ce=li.querySelector('[data-code-el]'), te=li.querySelector('[data-timer-el]');
-      const pe=li.querySelector('.progress'),    cb=li.querySelector('.btn-copy');
-      if(ce) ce.textContent=code;
-      if(te) te.textContent=`${remaining}s`;
-      if(pe) pe.style.width=`${progressPercent}%`;
-      if(cb) cb.dataset.code=code;
+      try { code = totp(await decryptSecret(account, state.masterPassword), account.period || 30); } catch { code = 'ERR'; }
+      const ce = li.querySelector('[data-code-el]'), te = li.querySelector('[data-timer-el]');
+      const pe = li.querySelector('.progress'),    cb = li.querySelector('.btn-copy');
+      if (ce) ce.textContent = code;
+      if (te) te.textContent = `${remaining}s`;
+      if (pe) pe.style.width = `${progressPercent}%`;
+      if (cb) cb.dataset.code = code;
     }
   }
 };
@@ -402,7 +380,7 @@ const importAccounts = async (file) => {
     await store.importAll(text);
     await renderAccounts(true);
     setStatus('Импорт выполнен', 'success');
-  } catch (e) { setStatus('Ошибка импорта: '+e.message, 'error'); }
+  } catch (e) { setStatus('Ошибка импорта: ' + e.message, 'error'); }
 };
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -438,11 +416,16 @@ const init = async () => {
     try {
       base32ToBytes(secret);
       const { ciphertext, iv, mac, algo } = await encryptSecret(secret, state.masterPassword);
-      await store.addAccount({ issuer, accountName, secretEnc: ciphertext, iv, mac, algo, digits: 6, period: 30, algorithm: 'SHA1' });
+      await store.addAccount({
+        issuer, accountName,
+        secretEnc: ciphertext, iv, mac, algo,
+        digits: 6, period: 30,
+        algorithm: OTP_ALGORITHM
+      });
       els.addForm.reset();
       await renderAccounts(true);
-      setStatus('Аккаунт добавлен (ГОСТ Р 34.12-2015)', 'success');
-    } catch (e) { setStatus('Ошибка: '+e.message, 'error'); }
+      setStatus('Аккаунт добавлен (HMAC-Стрибог-256)', 'success');
+    } catch (e) { setStatus('Ошибка: ' + e.message, 'error'); }
   });
 
   els.accountsList?.addEventListener('click', async (e) => {
@@ -470,5 +453,5 @@ const init = async () => {
 
 init().catch(e => {
   console.error('Init failed:', e);
-  setStatus('Ошибка инициализации: '+e.message, 'error');
+  setStatus('Ошибка инициализации: ' + e.message, 'error');
 });
